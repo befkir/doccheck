@@ -8,15 +8,18 @@ from z3 import *
 
 SELFIE = os.path.expanduser("~/selfie/selfie")
 
-def _models(x, y=None):
+def _models(x, b=None):
     zero = BitVecVal(0, 64)
     c100 = BitVecVal(100, 64)
-    b    = y if y is not None else BitVecVal(42, 64)
+    if b is None:
+        b = BitVecVal(42, 64)
     return {
-        "absolute": If(ULT(x, zero), -x, x),
-        "double":   x * BitVecVal(2, 64),
-        "clamp100": If(UGT(x, c100), c100, x),
-        "max":      If(UGT(x, b), x, b),
+        "absolute":   If(ULT(x, zero), -x, x),
+        "double":     x * BitVecVal(2, 64),
+        "double_val": x * BitVecVal(2, 64),
+        "clamp":      If(UGT(x, c100), c100, x),
+        "clamp100":   If(UGT(x, c100), c100, x),
+        "max":        If(UGT(x, b), x, b),
     }
 
 def _violation(check_statement, result_expr, x):
