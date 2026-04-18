@@ -10,7 +10,32 @@
     "expected": "FALSIFIED"
   },
   {
-    "function": "absolute.c",
+    "function": "max.c",
+    "claim": "never returns a negative value",
+    "expected": "VERIFIED"
+  },
+  {
+    "function": "max.c",
+    "claim": "output is always smaller than input",
+    "expected": "FALSIFIED"
+  },
+  {
+    "function": "double.c",
+    "claim": "never returns a negative value",
+    "expected": "VERIFIED"
+  },
+  {
+    "function": "double.c",
+    "claim": "output equals input",
+    "expected": "FALSIFIED"
+  },
+  {
+    "function": "clamp.c",
+    "claim": "result is never greater than 100",
+    "expected": "VERIFIED"
+  },
+  {
+    "function": "clamp.c",
     "claim": "always returns zero",
     "expected": "FALSIFIED"
   }
