@@ -11,6 +11,8 @@ SELFIE = os.path.expanduser("~/selfie/selfie")
 def _models(x, b=None):
     zero = BitVecVal(0, 64)
     c100 = BitVecVal(100, 64)
+    c42  = BitVecVal(42, 64)
+    c1   = BitVecVal(1, 64)
     if b is None:
         b = BitVecVal(42, 64)
     return {
@@ -20,6 +22,11 @@ def _models(x, b=None):
         "clamp":      If(UGT(x, c100), c100, x),
         "clamp100":   If(UGT(x, c100), c100, x),
         "max":        If(UGT(x, b), x, b),
+        "min":        If(ULT(x, c42), x, c42),
+        "increment":  x + c1,
+        "identity":   x,
+        "zero":       zero,
+        "square":     x * x,
     }
 
 def _violation(check_statement, result_expr, x):
@@ -34,6 +41,8 @@ def _violation(check_statement, result_expr, x):
         "result != 0" : result_expr != zero,
         "result == 0" : result_expr == zero,
         "result > 100": UGT(result_expr, BitVecVal(100, 64)),
+        "result > 42" : UGT(result_expr, BitVecVal(42, 64)),
+        "result <= 42": ULE(result_expr, BitVecVal(42, 64)),
     }
     for pattern, expr in conditions.items():
         if pattern in check_statement:
