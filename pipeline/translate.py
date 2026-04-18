@@ -38,4 +38,5 @@ def translate_claim(function_source: str, claim: str) -> str:
     raw = result["response"].strip().split('\n')[0].strip()
     # normalise common LLM substitutions
     raw = raw.replace("absolute(x)", "result").replace("absolute(*x)", "result")
+    raw = raw.replace("*x", "x")   # normalise pointer dereference to plain variable
     return raw
