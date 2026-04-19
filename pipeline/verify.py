@@ -1,18 +1,55 @@
 """
-verify.py — compiles patched C* and verifies the claim with Z3.
-Shared across all experiment branches. Do not modify without team agreement.
+verify.py — general symbolic verification using Z3.
+Shared pipeline component. Do not modify without team agreement.
 """
 import subprocess
 import os
 from z3 import *
 
-SELFIE  = os.path.expanduser("~/selfie/selfie")
+SELFIE = os.path.expanduser("~/selfie/selfie")
 
-def compile_source(source: str) -> tuple[bool, str]:
-    """
-    Compile C* source with starc.
-    Returns (success, compiler_output).
-    """
+def _models(x, b=None):
+    zero = BitVecVal(0, 64)
+    c100 = BitVecVal(100, 64)
+    c42  = BitVecVal(42, 64)
+    c1   = BitVecVal(1, 64)
+    if b is None:
+        b = BitVecVal(42, 64)
+    return {
+        "absolute":   If(ULT(x, zero), -x, x),
+        "double":     x * BitVecVal(2, 64),
+        "double_val": x * BitVecVal(2, 64),
+        "clamp":      If(UGT(x, c100), c100, x),
+        "clamp100":   If(UGT(x, c100), c100, x),
+        "max":        If(UGT(x, b), x, b),
+        "min":        If(ULT(x, c42), x, c42),
+        "increment":  x + c1,
+        "identity":   x,
+        "zero":       zero,
+        "square":     x * x,
+    }
+
+def _violation(check_statement, result_expr, x):
+    zero = BitVecVal(0, 64)
+    conditions = {
+        "result < 0"  : ULT(result_expr, zero),
+        "result <= 0" : ULE(result_expr, zero),
+        "result >= x" : UGE(result_expr, x),
+        "result > x"  : UGT(result_expr, x),
+        "result != x" : result_expr != x,
+        "result == x" : result_expr == x,
+        "result != 0" : result_expr != zero,
+        "result == 0" : result_expr == zero,
+        "result > 100": UGT(result_expr, BitVecVal(100, 64)),
+        "result > 42" : UGT(result_expr, BitVecVal(42, 64)),
+        "result <= 42": ULE(result_expr, BitVecVal(42, 64)),
+    }
+    for pattern, expr in conditions.items():
+        if pattern in check_statement:
+            return expr
+    return None
+
+def compile_source(source):
     with open("/tmp/patched.c", "w") as f:
         f.write(source)
     result = subprocess.run(
@@ -23,47 +60,29 @@ def compile_source(source: str) -> tuple[bool, str]:
         return False, result.stdout
     return True, result.stdout
 
-def verify_with_z3(check_statement: str, function_source: str) -> dict:
-    """
-    Use Z3 to check whether the violation condition is satisfiable.
-    Returns dict with keys: verdict, witness, error
-      verdict: "VERIFIED" | "FALSIFIED" | "UNKNOWN"
-      witness: concrete input value if FALSIFIED, else None
-      error:   error message if UNKNOWN, else None
-    """
+def verify_with_z3(check_statement, function_name):
     x    = BitVec('x', 64)
-    zero = BitVecVal(0, 64)
-
-    # symbolic execution of absolute(x) — unsigned 64-bit
-    result_expr = If(ULT(x, zero), -x, x)
-
-    conditions = {
-        "result < 0"  : ULT(result_expr, zero),
-        "result <= 0" : ULE(result_expr, zero),
-        "result >= x" : Not(ULT(result_expr, x)),
-        "result > x"  : ULT(x, result_expr),
-        "result != x" : result_expr != x,
-        "result == x" : result_expr == x,
-        "result != 0" : result_expr != zero,
-        "result == 0" : result_expr == zero,
-    }
-
-    violation = None
-    for pattern, expr in conditions.items():
-        if pattern in check_statement:
-            violation = expr
-            break
-
+    b42  = BitVecVal(42, 64)   # concrete second arg for two-param functions
+    models = _models(x, b42)
+    if function_name not in models:
+        return {
+            "verdict": "UNKNOWN",
+            "witness": None,
+            "error": f"No Z3 model for '{function_name}'. Add it to verify.py."
+        }
+    result_expr = models[function_name]
+    violation   = _violation(check_statement, result_expr, x)
     if violation is None:
-        return {"verdict": "UNKNOWN", "witness": None,
-                "error": f"Cannot parse condition: {check_statement}"}
-
+        return {
+            "verdict": "UNKNOWN",
+            "witness": None,
+            "error": f"Cannot parse condition: {check_statement}"
+        }
     solver = Solver()
     solver.add(violation)
     outcome = solver.check()
-
     if outcome == sat:
-        val = solver.model().eval(x, model_completion=True)
+        val     = solver.model().eval(x, model_completion=True)
         witness = val.as_long() if hasattr(val, 'as_long') else str(val)
         return {"verdict": "FALSIFIED", "witness": witness, "error": None}
     elif outcome == unsat:

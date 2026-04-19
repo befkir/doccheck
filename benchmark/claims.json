@@ -10,8 +10,82 @@
     "expected": "FALSIFIED"
   },
   {
-    "function": "absolute.c",
+    "function": "max.c",
+    "claim": "never returns a negative value",
+    "expected": "VERIFIED"
+  },
+  {
+    "function": "max.c",
+    "claim": "output is always smaller than input",
+    "expected": "FALSIFIED"
+  },
+  {
+    "function": "double.c",
+    "claim": "never returns a negative value",
+    "expected": "VERIFIED"
+  },
+  {
+    "function": "double.c",
+    "claim": "output equals input",
+    "expected": "FALSIFIED"
+  },
+  {
+    "function": "clamp.c",
+    "claim": "result is never greater than 100",
+    "expected": "VERIFIED"
+  },
+  {
+    "function": "clamp.c",
     "claim": "always returns zero",
+    "expected": "FALSIFIED"
+  },{
+    "function": "min.c",
+    "claim": "never returns more than 42",
+    "expected": "VERIFIED"
+  },
+  {
+    "function": "min.c",
+    "claim": "output equals input",
+    "expected": "FALSIFIED"
+  },
+  {
+    "function": "increment.c",
+    "claim": "never returns a negative value",
+    "expected": "VERIFIED"
+  },
+  {
+    "function": "increment.c",
+    "claim": "output equals input",
+    "expected": "FALSIFIED"
+  },
+  {
+    "function": "identity.c",
+    "claim": "output equals input",
+    "expected": "VERIFIED"
+  },
+  {
+    "function": "identity.c",
+    "claim": "always returns zero",
+    "expected": "FALSIFIED"
+  },
+  {
+    "function": "zero.c",
+    "claim": "always returns zero",
+    "expected": "VERIFIED"
+  },
+  {
+    "function": "zero.c",
+    "claim": "never returns a negative value",
+    "expected": "VERIFIED"
+  },
+  {
+    "function": "square.c",
+    "claim": "never returns a negative value",
+    "expected": "VERIFIED"
+  },
+  {
+    "function": "square.c",
+    "claim": "output equals input",
     "expected": "FALSIFIED"
   }
 ]
