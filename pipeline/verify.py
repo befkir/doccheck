@@ -41,21 +41,21 @@ def _models(x, b=None):
 def _violation(check_statement, result_expr, x):
     zero = BitVecVal(0, 64)
     conditions = {
-        "result < 0"  : ULT(result_expr, zero),
-        "result <= 0" : ULE(result_expr, zero),
-        "result >= x" : UGE(result_expr, x),
-        "result > x"  : UGT(result_expr, x),
-        "result != x" : result_expr != x,
-        "result == x" : result_expr == x,
-        "result != 0" : result_expr != zero,
-        "result == 0" : result_expr == zero,
-        "result > 100": UGT(result_expr, BitVecVal(100, 64)),
-        "result > 42" : UGT(result_expr, BitVecVal(42, 64)),
-        "result <= 42": ULE(result_expr, BitVecVal(42, 64)),
-        "result > 1"  : UGT(result_expr, BitVecVal(1, 64)),
-        "result > 10" : UGT(result_expr, BitVecVal(10, 64)),
-        "result > 42" : UGT(result_expr, BitVecVal(42, 64)),
-        
+        # IMPORTANT: longer patterns must come before shorter ones
+        # to prevent substring false matches e.g. "result > 1" matching "result > 10"
+        "result > 100" : UGT(result_expr, BitVecVal(100, 64)),
+        "result > 42"  : UGT(result_expr, BitVecVal(42, 64)),
+        "result > 10"  : UGT(result_expr, BitVecVal(10, 64)),
+        "result > 1"   : UGT(result_expr, BitVecVal(1, 64)),
+        "result <= 42" : ULE(result_expr, BitVecVal(42, 64)),
+        "result <= 0"  : ULE(result_expr, zero),
+        "result >= x"  : UGE(result_expr, x),
+        "result != 0"  : result_expr != zero,
+        "result != x"  : result_expr != x,
+        "result == 0"  : result_expr == zero,
+        "result == x"  : result_expr == x,
+        "result < 0"   : ULT(result_expr, zero),
+        "result > x"   : UGT(result_expr, x),
     }
     for pattern, expr in conditions.items():
         if pattern in check_statement:
@@ -75,7 +75,7 @@ def compile_source(source):
 
 def _find_small_witness(check_statement, function_name):
     """Try small inputs 0-20 to find a human-readable counterexample."""
-    for val in range(21):
+    for val in range(50):
         x_concrete = BitVecVal(val, 64)
         b_concrete  = BitVecVal(42, 64)
         models = _models(x_concrete, b_concrete)
