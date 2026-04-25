@@ -227,4 +227,136 @@
     "expected": "VERIFIED",
     "human_check": "if (result < 0) { return 1; }"
   }
+  ,{
+    "function": "between.c",
+    "claim": "always returns zero or one",
+    "expected": "VERIFIED",
+    "human_check": "if (result > 1) { return 1; }"
+  },
+  {
+    "function": "between.c",
+    "claim": "output equals input",
+    "expected": "FALSIFIED",
+    "human_check": "if (result != x) { return 1; }"
+  },
+  {
+    "function": "positive.c",
+    "claim": "always returns zero or one",
+    "expected": "VERIFIED",
+    "human_check": "if (result > 1) { return 1; }"
+  },
+  {
+    "function": "positive.c",
+    "claim": "output equals input",
+    "expected": "FALSIFIED",
+    "human_check": "if (result != x) { return 1; }"
+  },
+  {
+    "function": "clamp50.c",
+    "claim": "result is never greater than 50",
+    "expected": "VERIFIED",
+    "human_check": "if (result > 50) { return 1; }"
+  },
+  {
+    "function": "clamp50.c",
+    "claim": "output equals input",
+    "expected": "FALSIFIED",
+    "human_check": "if (result != x) { return 1; }"
+  },
+  {
+    "function": "add100.c",
+    "claim": "output equals input",
+    "expected": "FALSIFIED",
+    "human_check": "if (result != x) { return 1; }"
+  },
+  {
+    "function": "add100.c",
+    "claim": "never returns a negative value",
+    "expected": "VERIFIED",
+    "human_check": "if (result < 0) { return 1; }"
+  },
+  {
+    "function": "divby3.c",
+    "claim": "output equals input",
+    "expected": "FALSIFIED",
+    "human_check": "if (result != x) { return 1; }"
+  },
+  {
+    "function": "divby3.c",
+    "claim": "never returns a negative value",
+    "expected": "VERIFIED",
+    "human_check": "if (result < 0) { return 1; }"
+  },
+  {
+    "function": "mod10.c",
+    "claim": "never returns a negative value",
+    "expected": "VERIFIED",
+    "human_check": "if (result < 0) { return 1; }"
+  },
+  {
+    "function": "mod10.c",
+    "claim": "output equals input",
+    "expected": "FALSIFIED",
+    "human_check": "if (result != x) { return 1; }"
+  },
+  {
+    "function": "const0.c",
+    "claim": "always returns zero",
+    "expected": "VERIFIED",
+    "human_check": "if (result != 0) { return 1; }"
+  },
+  {
+    "function": "const0.c",
+    "claim": "output equals input",
+    "expected": "FALSIFIED",
+    "human_check": "if (result != x) { return 1; }"
+  },
+  {
+    "function": "const1.c",
+    "claim": "output equals input",
+    "expected": "FALSIFIED",
+    "human_check": "if (result != x) { return 1; }"
+  },
+  {
+    "function": "const1.c",
+    "claim": "always returns zero",
+    "expected": "FALSIFIED",
+    "human_check": "if (result != 0) { return 1; }"
+  },
+  {
+    "function": "add1.c",
+    "claim": "output equals input",
+    "expected": "FALSIFIED",
+    "human_check": "if (result != x) { return 1; }"
+  },
+  {
+    "function": "add1.c",
+    "claim": "never returns a negative value",
+    "expected": "VERIFIED",
+    "human_check": "if (result < 0) { return 1; }"
+  },
+  {
+    "function": "max100.c",
+    "claim": "never returns a negative value",
+    "expected": "VERIFIED",
+    "human_check": "if (result < 0) { return 1; }"
+  },
+  {
+    "function": "max100.c",
+    "claim": "output equals input",
+    "expected": "FALSIFIED",
+    "human_check": "if (result != x) { return 1; }"
+  },
+  {
+    "function": "sign.c",
+    "claim": "always returns zero or one",
+    "expected": "VERIFIED",
+    "human_check": "if (result > 1) { return 1; }"
+  },
+  {
+    "function": "sign.c",
+    "claim": "output equals input",
+    "expected": "FALSIFIED",
+    "human_check": "if (result != x) { return 1; }"
+  }
 ]

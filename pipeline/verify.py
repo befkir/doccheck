@@ -36,6 +36,17 @@ def _models(x, b=None):
         "const42":    BitVecVal(42, 64),
         "mod2":       URem(x, BitVecVal(2, 64)),
         "max_zero":   If(UGT(x, zero), x, zero),
+        "between":  If(And(UGE(x, BitVecVal(10,64)), ULE(x, BitVecVal(100,64))), BitVecVal(1,64), zero),
+        "positive": If(UGT(x, zero), BitVecVal(1,64), zero),
+        "clamp50":  If(UGT(x, BitVecVal(50,64)), BitVecVal(50,64), x),
+        "add100":   x + BitVecVal(100, 64),
+        "divby3":   UDiv(x, BitVecVal(3, 64)),
+        "mod10":    URem(x, BitVecVal(10, 64)),
+        "const0":   zero,
+        "const1":   BitVecVal(1, 64),
+        "add1":     x + BitVecVal(1, 64),
+        "max100":   If(UGT(x, BitVecVal(100,64)), x, BitVecVal(100,64)),
+        "sign":     If(x == zero, zero, BitVecVal(1,64)),
     }
 
 def _violation(check_statement, result_expr, x):
@@ -56,6 +67,9 @@ def _violation(check_statement, result_expr, x):
         "result == x"  : result_expr == x,
         "result < 0"   : ULT(result_expr, zero),
         "result > x"   : UGT(result_expr, x),
+        "result > 50"  : UGT(result_expr, BitVecVal(50, 64)),
+        "result != 1"  : result_expr != BitVecVal(1, 64),
+        "result == 1"  : result_expr == BitVecVal(1, 64),
     }
     for pattern, expr in conditions.items():
         if pattern in check_statement:
