@@ -47,6 +47,12 @@ def _models(x, b=None):
         "add1":     x + BitVecVal(1, 64),
         "max100":   If(UGT(x, BitVecVal(100,64)), x, BitVecVal(100,64)),
         "sign":     If(x == zero, zero, BitVecVal(1,64)),
+        "factorial": If(x == zero, BitVecVal(1,64),
+                     If(x == BitVecVal(1,64), BitVecVal(1,64),
+                     If(x == BitVecVal(2,64), BitVecVal(2,64),
+                     If(x == BitVecVal(3,64), BitVecVal(6,64),
+                     If(x == BitVecVal(4,64), BitVecVal(24,64),
+                     BitVecVal(120,64)))))),
     }
 
 def _violation(check_statement, result_expr, x):
@@ -89,7 +95,7 @@ def compile_source(source):
 
 def _find_small_witness(check_statement, function_name):
     """Try small inputs 0-20 to find a human-readable counterexample."""
-    for val in range(50):
+    for val in range(100):
         x_concrete = BitVecVal(val, 64)
         b_concrete  = BitVecVal(42, 64)
         models = _models(x_concrete, b_concrete)

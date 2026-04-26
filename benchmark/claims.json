@@ -229,7 +229,7 @@
   }
   ,{
     "function": "between.c",
-    "claim": "always returns zero or one",
+    "claim": "never returns more than 1",
     "expected": "VERIFIED",
     "human_check": "if (result > 1) { return 1; }"
   },
@@ -241,7 +241,7 @@
   },
   {
     "function": "positive.c",
-    "claim": "always returns zero or one",
+    "claim": "never returns more than 1",
     "expected": "VERIFIED",
     "human_check": "if (result > 1) { return 1; }"
   },
@@ -349,12 +349,24 @@
   },
   {
     "function": "sign.c",
-    "claim": "always returns zero or one",
+    "claim": "never returns more than 1",
     "expected": "VERIFIED",
     "human_check": "if (result > 1) { return 1; }"
   },
   {
     "function": "sign.c",
+    "claim": "output equals input",
+    "expected": "FALSIFIED",
+    "human_check": "if (result != x) { return 1; }"
+  }
+  ,{
+    "function": "factorial.c",
+    "claim": "never returns a negative value",
+    "expected": "VERIFIED",
+    "human_check": "if (result < 0) { return 1; }"
+  },
+  {
+    "function": "factorial.c",
     "claim": "output equals input",
     "expected": "FALSIFIED",
     "human_check": "if (result != x) { return 1; }"
