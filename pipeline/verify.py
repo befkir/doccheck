@@ -21,28 +21,61 @@ def _models(x, b=None):
         "double_val": x * BitVecVal(2, 64),
         "clamp":      If(UGT(x, c100), c100, x),
         "clamp100":   If(UGT(x, c100), c100, x),
+        "clamp10":    If(UGT(x, BitVecVal(10, 64)), BitVecVal(10, 64), x),
         "max":        If(UGT(x, b), x, b),
-        "min":        If(ULT(x, c42), x, c42),
-        "increment":  x + c1,
+        "min":        If(ULT(x, BitVecVal(42, 64)), x, BitVecVal(42, 64)),
+        "increment":  x + BitVecVal(1, 64),
         "identity":   x,
         "zero":       zero,
         "square":     x * x,
+        "isZero":     If(x == zero, BitVecVal(1, 64), zero),
+        "halve":      UDiv(x, BitVecVal(2, 64)),
+        "add10":      x + BitVecVal(10, 64),
+        "triple":     x * BitVecVal(3, 64),
+        "pred":       x - BitVecVal(1, 64),
+        "const42":    BitVecVal(42, 64),
+        "mod2":       URem(x, BitVecVal(2, 64)),
+        "max_zero":   If(UGT(x, zero), x, zero),
+        "between":  If(And(UGE(x, BitVecVal(10,64)), ULE(x, BitVecVal(100,64))), BitVecVal(1,64), zero),
+        "positive": If(UGT(x, zero), BitVecVal(1,64), zero),
+        "clamp50":  If(UGT(x, BitVecVal(50,64)), BitVecVal(50,64), x),
+        "add100":   x + BitVecVal(100, 64),
+        "divby3":   UDiv(x, BitVecVal(3, 64)),
+        "mod10":    URem(x, BitVecVal(10, 64)),
+        "const0":   zero,
+        "const1":   BitVecVal(1, 64),
+        "add1":     x + BitVecVal(1, 64),
+        "max100":   If(UGT(x, BitVecVal(100,64)), x, BitVecVal(100,64)),
+        "sign":     If(x == zero, zero, BitVecVal(1,64)),
+        "factorial": If(x == zero, BitVecVal(1,64),
+                     If(x == BitVecVal(1,64), BitVecVal(1,64),
+                     If(x == BitVecVal(2,64), BitVecVal(2,64),
+                     If(x == BitVecVal(3,64), BitVecVal(6,64),
+                     If(x == BitVecVal(4,64), BitVecVal(24,64),
+                     BitVecVal(120,64)))))),
     }
 
 def _violation(check_statement, result_expr, x):
     zero = BitVecVal(0, 64)
     conditions = {
-        "result < 0"  : ULT(result_expr, zero),
-        "result <= 0" : ULE(result_expr, zero),
-        "result >= x" : UGE(result_expr, x),
-        "result > x"  : UGT(result_expr, x),
-        "result != x" : result_expr != x,
-        "result == x" : result_expr == x,
-        "result != 0" : result_expr != zero,
-        "result == 0" : result_expr == zero,
-        "result > 100": UGT(result_expr, BitVecVal(100, 64)),
-        "result > 42" : UGT(result_expr, BitVecVal(42, 64)),
-        "result <= 42": ULE(result_expr, BitVecVal(42, 64)),
+        # IMPORTANT: longer patterns must come before shorter ones
+        # to prevent substring false matches e.g. "result > 1" matching "result > 10"
+        "result > 100" : UGT(result_expr, BitVecVal(100, 64)),
+        "result > 42"  : UGT(result_expr, BitVecVal(42, 64)),
+        "result > 10"  : UGT(result_expr, BitVecVal(10, 64)),
+        "result > 1"   : UGT(result_expr, BitVecVal(1, 64)),
+        "result <= 42" : ULE(result_expr, BitVecVal(42, 64)),
+        "result <= 0"  : ULE(result_expr, zero),
+        "result >= x"  : UGE(result_expr, x),
+        "result != 0"  : result_expr != zero,
+        "result != x"  : result_expr != x,
+        "result == 0"  : result_expr == zero,
+        "result == x"  : result_expr == x,
+        "result < 0"   : ULT(result_expr, zero),
+        "result > x"   : UGT(result_expr, x),
+        "result > 50"  : UGT(result_expr, BitVecVal(50, 64)),
+        "result != 1"  : result_expr != BitVecVal(1, 64),
+        "result == 1"  : result_expr == BitVecVal(1, 64),
     }
     for pattern, expr in conditions.items():
         if pattern in check_statement:
@@ -59,6 +92,24 @@ def compile_source(source):
     if "syntax error" in result.stdout:
         return False, result.stdout
     return True, result.stdout
+
+def _find_small_witness(check_statement, function_name):
+    """Try small inputs 0-20 to find a human-readable counterexample."""
+    for val in range(100):
+        x_concrete = BitVecVal(val, 64)
+        b_concrete  = BitVecVal(42, 64)
+        models = _models(x_concrete, b_concrete)
+        if function_name not in models:
+            return None
+        result_val = models[function_name]
+        violation  = _violation(check_statement, result_val, x_concrete)
+        if violation is None:
+            return None
+        s = Solver()
+        s.add(violation)
+        if s.check() == sat:
+            return val
+    return None
 
 def verify_with_z3(check_statement, function_name):
     x    = BitVec('x', 64)
@@ -84,7 +135,9 @@ def verify_with_z3(check_statement, function_name):
     if outcome == sat:
         val     = solver.model().eval(x, model_completion=True)
         witness = val.as_long() if hasattr(val, 'as_long') else str(val)
-        return {"verdict": "FALSIFIED", "witness": witness, "error": None}
+        small   = _find_small_witness(check_statement, function_name)
+        display = small if small is not None else witness
+        return {"verdict": "FALSIFIED", "witness": display, "error": None}
     elif outcome == unsat:
         return {"verdict": "VERIFIED", "witness": None, "error": None}
     else:
