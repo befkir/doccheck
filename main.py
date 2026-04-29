@@ -90,5 +90,5 @@ def main(target_file):
 
 if __name__ == "__main__":
     # You can change this path to whatever test file you want to check
-    test_file = "data/targets/test_code.py"
+    test_file = sys.argv[1] if len(sys.argv) > 1 else "data/targets/test_code.py"
     main(test_file)

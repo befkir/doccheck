@@ -5,9 +5,17 @@ def inject_assertion(source_code: str, assertion_code: str, target_func_sig: str
     Transforms the code into a format CrossHair cannot ignore.
     It wraps the target function and checks the logic as a post-condition.
     """
-    # 1. Extract the logic from the assertion (e.g., '__return__ < x')
-    # We remove 'assert ' prefix if present
-    condition = assertion_code.replace("assert ", "").strip()
+    # 1. Extract the logic from the assertion
+    # We remove 'assert ' prefix from each line and join with ' and '
+    lines = [line.strip() for line in assertion_code.splitlines() if line.strip()]
+    cleaned_lines = []
+    for line in lines:
+        if line.startswith("assert "):
+            cleaned_lines.append(line.replace("assert ", "", 1).strip())
+        else:
+            cleaned_lines.append(line.strip())
+    
+    condition = " and ".join(f"({c})" for c in cleaned_lines) if cleaned_lines else "True"
 
     # 2. Reconstruct the code to use a 'post-condition' wrapper
     # This is more robust than manual AST injection for CrossHair

@@ -8,7 +8,9 @@ def generate_assertion(func_sig, claim):
         "2. Use variable names from the signature.\n"
         "3. Use '__return__' to represent the function's output.\n"
         "4. DO NOT use specific numbers like 1, 2, or 10 unless the claim mentions them.\n"
-        "5. NO explanations or backticks."
+        "5. DO NOT use in-place methods like .sort(), .append(), or .pop(). They return None.\n"
+        "6. To check if a list is sorted, use: all(__return__[i] <= __return__[i+1] for i in range(len(__return__)-1))\n"
+        "7. NO explanations or backticks."
     )
     prompt = f"""
     Signature: {func_sig}
