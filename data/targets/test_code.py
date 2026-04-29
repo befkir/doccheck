@@ -1,14 +1,14 @@
-# # claim: the function always returns a value greater than the input x
-# def increment(x: int) -> int:
-#     return x + 1
+# claim: the function always returns a value greater than the input x
+def increment(x: int) -> int:
+    return x + 1
 
-# # claim: the function always returns a value less than the input x
-# def decrement(x: int) -> int:
-#     return x + 1
+# claim: the function always returns a value less than the input x
+def decrement(x: int) -> int:
+    return x + 1
 
-# # claim: the function always returns a value exactly twice the input x
-# def double(x: int) -> int:
-#     return x * 3
+# claim: the function always returns a value exactly twice the input x
+def double(x: int) -> int:
+    return x * 3
 
 # # claim: the function always returns a non-negative integer
 # def absolute_difference(a: int, b: int) -> int:
@@ -28,6 +28,7 @@
 from typing import List
 
 # claim: the returned value is always greater than or equal to every element in the input list
+# precondition: len(numbers) > 0
 def find_maximum(numbers: List[int]) -> int:
     if not numbers:
         return 0
@@ -38,5 +39,6 @@ def find_maximum(numbers: List[int]) -> int:
     return max_val
 
 # claim: the resulting list always contains more elements than the input list
+# precondition: len(numbers) > 0
 def filter_positive_numbers(numbers: List[int]) -> List[int]:
     return [n for n in numbers if n > 0]

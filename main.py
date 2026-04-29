@@ -49,11 +49,14 @@ def main(target_file):
 
     for idx, item in enumerate(claims_and_sigs, 1):
         claim = item['claim']
+        precondition = item.get('precondition')
         sig = item['signature']
         func_name = item['func_name']
         
         print(f"\n" + "="*40)
         print(f"[*] Research Goal {idx}/{total}: Verify '{claim}' for function '{func_name}'")
+        if precondition:
+            print(f"[*] Precondition: {precondition}")
         print("="*40)
 
         # 2. Start the Agentic Loop
@@ -62,7 +65,7 @@ def main(target_file):
         if validated_assertion:
             # 3. Final Verification with CrossHair
             print("[*] Running CrossHair Symbolic Execution...")
-            instrumented_code = inject_assertion(source_code, validated_assertion, sig, func_name)
+            instrumented_code = inject_assertion(source_code, validated_assertion, sig, func_name, precondition)
             verdict = run_crosshair(instrumented_code)
             
             print("\n" + "-"*30)

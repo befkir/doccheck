@@ -4,12 +4,13 @@ def extract_claims_and_signatures(source_code):
     """
     Robustly extracts all natural language claims and their corresponding 
     function signatures using string analysis and basic AST parsing.
-    Returns a list of dicts: [{"claim": text, "signature": sig, "func_name": name}]
+    Returns a list of dicts: [{"claim": text, "precondition": text, "signature": sig, "func_name": name}]
     """
     lines = source_code.splitlines()
     
     results = []
     current_claim = None
+    current_precondition = None
     signature = ""
     found_def = False
     
@@ -20,8 +21,14 @@ def extract_claims_and_signatures(source_code):
         if "# claim:" in stripped:
             current_claim = stripped.split("# claim:")[1].strip()
             # Reset definition parsing state for the new claim
+            current_precondition = None
             signature = ""
             found_def = False
+            continue
+            
+        # Look for # precondition: comment (must come after a claim)
+        if current_claim and "# precondition:" in stripped:
+            current_precondition = stripped.split("# precondition:")[1].strip()
             continue
             
         if current_claim:
@@ -40,12 +47,14 @@ def extract_claims_and_signatures(source_code):
                     
                     results.append({
                         "claim": current_claim,
+                        "precondition": current_precondition,
                         "signature": signature,
                         "func_name": func_name
                     })
                     
                     # Reset state for next claim
                     current_claim = None
+                    current_precondition = None
                     signature = ""
                     found_def = False
                     

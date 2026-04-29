@@ -26,12 +26,14 @@ pip install -r requirements.txt
 ## Usage
 
 1. **Annotate your code**: Add `# claim: <your natural language claim>` directly above the function you wish to verify.
+   You can optionally add `# precondition: <python condition>` on the line below the claim. **This is highly recommended** to constrain the inputs and prevent the symbolic execution engine from generating trivial or irrelevant edge cases (like testing an empty list on a function that assumes populated data).
 
    Example (`data/targets/test_code.py`):
    ```python
    from typing import List
 
    # claim: the returned value is always greater than or equal to every element in the input list
+   # precondition: len(numbers) > 0
    def find_maximum(numbers: List[int]) -> int:
        if not numbers:
            return 0

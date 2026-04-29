@@ -1,6 +1,6 @@
 import libcst as cst
 
-def inject_assertion(source_code: str, assertion_code: str, target_func_sig: str, target_func_name: str) -> str:
+def inject_assertion(source_code: str, assertion_code: str, target_func_sig: str, target_func_name: str, precondition: str = None) -> str:
     """
     Transforms the code into a format CrossHair cannot ignore.
     It wraps the target function and checks the logic as a post-condition.
@@ -27,6 +27,8 @@ def inject_assertion(source_code: str, assertion_code: str, target_func_sig: str
                 arg_names.append(arg_name)
     call_args = ", ".join(arg_names)
 
+    pre_str = precondition if precondition else "True"
+
     # We create a 'checker' function that CrossHair will analyze
     # This format forces CrossHair to bind the return value of the logic to the condition
     instrumented_template = f"""
@@ -34,7 +36,7 @@ def inject_assertion(source_code: str, assertion_code: str, target_func_sig: str
 
 {checker_sig}
     '''
-    pre: True
+    pre: {pre_str}
     post: {condition}
     '''
     # We call your actual function logic here
