@@ -1,3 +1,4 @@
-z3-solver
-requests
-pytest
+ollama
+crosshair-tool
+libcst
+pydantic
