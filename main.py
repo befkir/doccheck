@@ -19,10 +19,19 @@ def run_loop(claim, sig, source_code):
         # Note: We pass feedback in the prompt if this isn't the first try
         assertion = generate_assertion(sig, claim + current_feedback)
         
-        # Step 2: Back-translate with Code-Model (Qwen)
+        # Step 2: Syntax Validation
+        import ast
+        try:
+            ast.parse(assertion)
+        except SyntaxError as e:
+            print(f"[-] Syntax error in generated assertion: {e}")
+            current_feedback = f"\nPrevious attempt generated invalid Python syntax. Do not wrap the assertion in strings. Error: {e}"
+            continue
+            
+        # Step 3: Back-translate with Code-Model (Qwen)
         translated = back_translate(assertion)
         
-        # Step 3: Critical Analysis with Reasoning-Model (DeepSeek)
+        # Step 4: Critical Analysis with Reasoning-Model (DeepSeek)
         is_match, feedback = compare_claims(claim, translated)
         
         if is_match:

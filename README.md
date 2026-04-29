@@ -13,6 +13,12 @@ Operates using an "Agentic Refinement Loop" powered by dual-LLMs, followed by fo
 3. **Symbolic Preparation**: Once a logically sound assertion is generated, Doc Check instruments the target function with CrossHair-compatible pre/post conditions.
 4. **Formal Verification**: `crosshair-tool` runs symbolic execution on the instrumented code to formally prove or disprove the claim across all possible inputs.
 
+## Key Features
+
+- **Robust Signature Parsing**: Leverages Python's Abstract Syntax Tree (AST) to reliably extract function arguments. This ensures compatibility with complex signatures, including type hints, default values, and variadic arguments (`*args`, `**kwargs`).
+- **Self-Healing Syntax Guardrails**: Automatically validates AI-generated assertions using `ast.parse` before execution. If the model generates invalid Python syntax, the system provides immediate feedback and triggers a retry, significantly improving loop stability.
+- **Comprehensive Verification Benchmark**: Includes a diverse test suite (`test_code.py`) with 12+ scenarios covering mathematical logic, string operations, data structure manipulations (Lists/Dictionaries), and floating-point edge cases.
+
 ## Setup & Installation
 
 Ensure you have Python installed, and then install the required dependencies:
