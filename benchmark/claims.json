@@ -1,0 +1,23 @@
+[
+  {
+    "id": "max_ge_a",
+    "file": "max.c",
+    "function": "max",
+    "claim": "The result is always greater than or equal to a.",
+    "expected": "UNSAT"
+  },
+  {
+    "id": "max_eq_a_false",
+    "file": "max.c",
+    "function": "max",
+    "claim": "The result is always equal to a.",
+    "expected": "SAT"
+  },
+  {
+    "id": "absolute_eq_x",
+    "file": "absolute.c",
+    "function": "absolute",
+    "claim": "The result is always equal to x.",
+    "expected": "UNSAT"
+  }
+]

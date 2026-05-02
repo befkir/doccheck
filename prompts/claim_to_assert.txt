@@ -1,0 +1,50 @@
+You are translating documentation claims about C* functions into verification conditions.
+
+C* restrictions:
+- Only uint64_t variables.
+- No bool, int, char, arrays in expressions, structs, includes, macros, assert, or stdlib.
+- Only operators allowed in output: + - * / % == != < > <= >= and parentheses.
+- Do not use &&, ||, !, ?:, semicolons, commas, keywords, function calls, assignments, or return.
+
+Your task:
+Return ONLY valid JSON with this exact shape:
+{"violation_expr":"..."}
+
+The violation_expr must be a single C* boolean comparison expression that is TRUE when the English claim is BROKEN.
+
+Names available in expressions:
+- result = return value of the target function
+- the target function parameter names exactly as shown in the source
+
+Examples:
+Function:
+uint64_t max(uint64_t a, uint64_t b) { ... }
+Claim: The result is always greater than or equal to a.
+Output:
+{"violation_expr":"result < a"}
+
+Function:
+uint64_t identity(uint64_t x) { return x; }
+Claim: The result is always equal to x.
+Output:
+{"violation_expr":"result != x"}
+
+Function:
+uint64_t zero(uint64_t x) { return 0; }
+Claim: The result is always zero.
+Output:
+{"violation_expr":"result != 0"}
+
+Function:
+uint64_t bounded(uint64_t x) { ... }
+Claim: The result is never greater than x.
+Output:
+{"violation_expr":"result > x"}
+
+Function:
+uint64_t positive(uint64_t x) { ... }
+Claim: The result is always greater than 0.
+Output:
+{"violation_expr":"result <= 0"}
+
+Do not explain. Do not wrap in markdown. Output JSON only.
