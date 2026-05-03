@@ -1,72 +1,86 @@
-"""
-verify.py — compiles patched C* and verifies the claim with Z3.
-Shared across all experiment branches. Do not modify without team agreement.
-"""
+from __future__ import annotations
+
 import subprocess
-import os
-from z3 import *
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
-SELFIE  = os.path.expanduser("~/selfie/selfie")
 
-def compile_source(source: str) -> tuple[bool, str]:
-    """
-    Compile C* source with starc.
-    Returns (success, compiler_output).
-    """
-    with open("/tmp/patched.c", "w") as f:
-        f.write(source)
-    result = subprocess.run(
-        [SELFIE, "-c", "/tmp/patched.c", "-o", "/tmp/patched.bin"],
-        capture_output=True, text=True
-    )
-    if "syntax error" in result.stdout:
-        return False, result.stdout
-    return True, result.stdout
+class VerificationError(Exception):
+    pass
 
-def verify_with_z3(check_statement: str, function_source: str) -> dict:
-    """
-    Use Z3 to check whether the violation condition is satisfiable.
-    Returns dict with keys: verdict, witness, error
-      verdict: "VERIFIED" | "FALSIFIED" | "UNKNOWN"
-      witness: concrete input value if FALSIFIED, else None
-      error:   error message if UNKNOWN, else None
-    """
-    x    = BitVec('x', 64)
-    zero = BitVecVal(0, 64)
 
-    # symbolic execution of absolute(x) — unsigned 64-bit
-    result_expr = If(ULT(x, zero), -x, x)
+@dataclass(frozen=True)
+class VerifyResult:
+    status: str
+    detail: str
+    counterexample: dict[str, Any] | None = None
+    smt_path: str | None = None
+    binary_path: str | None = None
 
-    conditions = {
-        "result < 0"  : ULT(result_expr, zero),
-        "result <= 0" : ULE(result_expr, zero),
-        "result >= x" : Not(ULT(result_expr, x)),
-        "result > x"  : ULT(x, result_expr),
-        "result != x" : result_expr != x,
-        "result == x" : result_expr == x,
-        "result != 0" : result_expr != zero,
-        "result == 0" : result_expr == zero,
-    }
 
-    violation = None
-    for pattern, expr in conditions.items():
-        if pattern in check_statement:
-            violation = expr
-            break
+SELFIE    = "/home/tinsae/selfie/selfie"
+BEATOR    = "/home/tinsae/selfie/tools/beator"
+BITME     = "/home/tinsae/selfie/tools/bitme.py"
+BITME_DIR = "/home/tinsae/selfie/tools"
 
-    if violation is None:
-        return {"verdict": "UNKNOWN", "witness": None,
-                "error": f"Cannot parse condition: {check_statement}"}
 
-    solver = Solver()
-    solver.add(violation)
-    outcome = solver.check()
+def run_cmd(cmd, timeout=120, cwd=None):
+    return subprocess.run(cmd, text=True, stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE, timeout=timeout, check=False, cwd=cwd)
 
-    if outcome == sat:
-        val = solver.model().eval(x, model_completion=True)
-        witness = val.as_long() if hasattr(val, 'as_long') else str(val)
-        return {"verdict": "FALSIFIED", "witness": witness, "error": None}
-    elif outcome == unsat:
-        return {"verdict": "VERIFIED", "witness": None, "error": None}
-    else:
-        return {"verdict": "UNKNOWN", "witness": None, "error": "Z3 returned unknown"}
+
+def compile_cstar(source_path, binary_path):
+    cmd = [SELFIE, "-c", str(source_path), "-o", str(binary_path)]
+    proc = run_cmd(cmd, timeout=60)
+    out = (proc.stdout or "") + (proc.stderr or "")
+    ok = proc.returncode == 0 and "syntax error" not in out.lower()
+    return ok, out
+
+
+def generate_btor2(source_path, btor2_path):
+    cwd = str(source_path.parent)
+    cmd = [BEATOR, "-c", str(source_path), "-", "1", "--check-block-access"]
+    proc = run_cmd(cmd, timeout=180, cwd=cwd)
+    out = (proc.stdout or "") + (proc.stderr or "")
+    generated = source_path.parent / (source_path.stem + "-beaten.btor2")
+    if generated.exists():
+        generated.rename(btor2_path)
+        return True, out
+    return False, out
+
+
+def run_bitme(btor2_path):
+    cmd = ["python3", BITME, str(btor2_path), "--use-Z3", "-kmax", "100"]
+    proc = run_cmd(cmd, timeout=600, cwd=BITME_DIR)
+    out = (proc.stdout or "") + (proc.stderr or "")
+    text = out.lower()
+    if "unsat" in text or "reached kmax" in text:
+        return "UNSAT", out, None
+    if "sat" in text or "bad-exit-code" in text:
+        return "SAT", out, None
+    return "UNKNOWN", out, None
+
+
+def verify_patched(source_path: Path, result_dir: Path) -> VerifyResult:
+    result_dir.mkdir(parents=True, exist_ok=True)
+    binary_path = result_dir / (source_path.stem + ".m")
+    btor2_path  = result_dir / (source_path.stem + ".btor2")
+
+    ok, compile_log = compile_cstar(source_path, binary_path)
+    (result_dir / "compile.log").write_text(compile_log)
+    if not ok:
+        return VerifyResult(status="COMPILE_ERROR", detail=compile_log,
+            binary_path=str(binary_path))
+
+    ok, beator_log = generate_btor2(source_path, btor2_path)
+    (result_dir / "rotor.log").write_text(beator_log)
+    if not ok:
+        return VerifyResult(status="ROTOR_ERROR", detail=beator_log,
+            binary_path=str(binary_path))
+
+    status, solver_log, model = run_bitme(btor2_path)
+    (result_dir / "solver.log").write_text(solver_log)
+    return VerifyResult(status=status, detail=solver_log,
+        counterexample=model, binary_path=str(binary_path),
+        smt_path=str(btor2_path))

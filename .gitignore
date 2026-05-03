@@ -1,23 +1,8 @@
-# Python
+.env
+.venv/
 __pycache__/
 *.pyc
-*.pyo
-doccheck-env/
-.env
-
-# Compiled binaries — never commit these
-*.bin
-selfie
-unicorn
-
-# Generated files
-*.btor2
 benchmark/results/
-
-# Temp
-/tmp/
-
-# Editor
-.vscode/
-*.swp
-*.swo
+*.m
+*.smt2
+*.log
