@@ -36,11 +36,11 @@ Markdown Report with LaTeX Proofs & Traces
 
 ## Team
 
-| Name | GitHub | Branch | Responsibility |
-|------|--------|--------|----------------|
-| Befkir | @befkir | `exp/llm-ollama` | Ollama/llama3.2 translation |
-| Samuel | @SamuelFentie | `exp/llm-openai` | OpenAI translation |
-| Tinsae | @tinsae27 | `exp/llm-openai` | OpenAI translation |
+| Name | GitHub | Branch |
+|------|--------|--------|
+| Befkir | @befkir | `exp/llm-ollama` |
+| Samuel | @SamuelFentie | `origin/exp-two  origin/Experimental` |
+| Tinsae | @tinsae27 | `exp/llm-openai` |
 
 ---
 
