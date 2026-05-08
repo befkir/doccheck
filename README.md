@@ -1,4 +1,4 @@
-# DocCheck
+# + DocCheck
 
 > **Verifying natural language documentation claims using symbolic execution and AI**
 

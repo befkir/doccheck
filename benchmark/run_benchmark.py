@@ -16,7 +16,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pipeline.translate import translate_claim
-from pipeline.inject    import inject_check
+from pipeline.inject    import inject_check, parse_signature
 from pipeline.verify    import verify_with_toolchain
 
 FUNCTIONS_DIR = os.path.join(os.path.dirname(__file__), "functions")
@@ -25,7 +25,10 @@ RESULTS_DIR   = os.path.join(os.path.dirname(__file__), "results")
 
 
 def _normalise(s: str) -> str:
-    return s.replace(" ", "").replace("\n", "")
+    """Remove whitespace and unify signaling (return 1 -> exit(1))."""
+    s = s.replace(" ", "").replace("\n", "").replace(";", "")
+    s = s.replace("return1", "exit(1)")
+    return s
 
 
 def run_all(kmax: int = 100) -> None:
@@ -64,9 +67,18 @@ def run_all(kmax: int = 100) -> None:
         total_claims += 1
         t0 = time.time()
 
+        # --- Step 0: parse signature ---
+        try:
+            real_func_name, params = parse_signature(source)
+            param_names = [p[1] for p in params]
+        except Exception as exc:
+            print(f"  ERROR {func_name:14} | {claim[:40]:40} — signature parse: {exc}")
+            errors += 1
+            continue
+
         # --- Step 1: translate ---
         try:
-            check_stmt = translate_claim(source, claim)
+            check_stmt = translate_claim(source, claim, real_func_name, param_names)
         except Exception as exc:
             elapsed = time.time() - t0
             print(f"  ERROR {func_name:14} | {claim[:40]:40} — LLM failed: {exc}")

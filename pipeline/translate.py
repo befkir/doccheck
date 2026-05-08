@@ -45,8 +45,13 @@ def _normalise_response(raw: str, func_name: str, param_names: list[str]) -> str
         line = pattern.sub("result", line)
 
     # Clean up potential LLM pointer-confusion for any parameter
+    # e.g. "*x", "* x", "(*x)" -> "x"
     for pname in param_names:
-        line = line.replace(f"*{pname}", pname)
+        line = re.sub(rf'\*\s*{re.escape(pname)}', pname, line)
+        line = re.sub(rf'\(\s*{re.escape(pname)}\s*\)', pname, line)
+
+    # Standardize signaling to exit(1) as per new project requirement
+    line = line.replace("return 1", "exit(1)").replace("return(1)", "exit(1)")
 
     return line
 
