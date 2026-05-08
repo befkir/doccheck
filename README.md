@@ -22,15 +22,15 @@ Given a C\* function F and a natural language claim S, determine whether S holds
 ## How it works
 English claim
 ↓  [1] LLM translates
-C* if-statement (violation check)
+C* if-statement (violation check with exit(1))
 ↓  [2] inject into function
 Patched C* source
-↓  [3] starc compiles
-RISC-V binary
-↓  [4] Unicorn / rotor
-BTOR2 symbolic model
-↓  [5] Z3 solves
+↓  [3] starc/monster compiles
+RISC-V binary & SMT-LIB constraints
+↓  [4] Z3 solves
 VERIFIED or FALSIFIED + counterexample
+↓  [5] LLM Explainer
+Markdown Report with LaTeX Proofs & Traces
 
 ---
 
@@ -105,9 +105,15 @@ python3 pipeline/pipeline.py benchmark/functions/absolute.c "never returns a neg
 
 ### Example output
 Claim   : never returns a negative value
-Check   : if (result < 0) { return 1; }
-Compile : OK
+Check   : if (result < 0) { exit(1); }
 Verdict : VERIFIED ✓ — proved for ALL inputs (Z3: UNSAT)
+Proof   : Exhaustive state-space search proved unsatisfiable.
+
+### AI Explanation & Proof
+**Mathematical Proof (LaTeX):**
+\[ \forall x \in \text{uint64}, \text{result} = |x| \implies \text{result} \geq 0 \]
+**Natural Language:**
+The function uses an unsigned 64-bit integer type. By definition, an unsigned integer cannot be less than zero.
 
 ---
 
@@ -140,8 +146,9 @@ def translate_claim(function_source: str, claim: str) -> str:
 ## Current status
 
 - [x] Toolchain installed (Selfie, Unicorn, Z3, Ollama)
-- [x] First end-to-end pipeline working on `absolute.c`
-- [x] VERIFIED and FALSIFIED verdicts with counterexamples
-- [ ] General BTOR2-based verification (not hardcoded)
-- [ ] 30-function benchmark
-- [ ] Evaluation across translation approaches
+- [x] General symbolic verification pipeline (not hardcoded to specific functions)
+- [x] Robust signaling via `exit(1)` (prevents return-value collisions)
+- [x] SMT-LIB Pretty-printing and LaTeX proof generation
+- [x] Automated AI Explainer for results
+- [ ] 30-function benchmark evaluation
+- [ ] Cross-backend comparison (Ollama vs Claude vs GPT-4)
