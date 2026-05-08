@@ -1,144 +1,208 @@
 """
-verify.py — general symbolic verification using Z3.
+verify.py — symbolic verification using the real Selfie/Unicorn toolchain.
+
+Pipeline:
+  1. compile_source()  : starc  → RISC-V binary  (/tmp/patched.bin)
+  2. run_beator()      : beator → BTOR2 model     (/tmp/patched.btor2)
+  3. verify_btor2()    : bitme  → SAT / UNSAT + witness
+
 Shared pipeline component. Do not modify without team agreement.
 """
+
 import subprocess
 import os
-from z3 import *
+import re
 
-SELFIE = os.path.expanduser("~/selfie/selfie")
+# ---------------------------------------------------------------------------
+# Tool paths — override with env vars if tools live elsewhere
+# ---------------------------------------------------------------------------
 
-def _models(x, b=None):
-    zero = BitVecVal(0, 64)
-    c100 = BitVecVal(100, 64)
-    c42  = BitVecVal(42, 64)
-    c1   = BitVecVal(1, 64)
-    if b is None:
-        b = BitVecVal(42, 64)
-    return {
-        "absolute":   If(ULT(x, zero), -x, x),
-        "double":     x * BitVecVal(2, 64),
-        "double_val": x * BitVecVal(2, 64),
-        "clamp":      If(UGT(x, c100), c100, x),
-        "clamp100":   If(UGT(x, c100), c100, x),
-        "clamp10":    If(UGT(x, BitVecVal(10, 64)), BitVecVal(10, 64), x),
-        "max":        If(UGT(x, b), x, b),
-        "min":        If(ULT(x, BitVecVal(42, 64)), x, BitVecVal(42, 64)),
-        "increment":  x + BitVecVal(1, 64),
-        "identity":   x,
-        "zero":       zero,
-        "square":     x * x,
-        "isZero":     If(x == zero, BitVecVal(1, 64), zero),
-        "halve":      UDiv(x, BitVecVal(2, 64)),
-        "add10":      x + BitVecVal(10, 64),
-        "triple":     x * BitVecVal(3, 64),
-        "pred":       x - BitVecVal(1, 64),
-        "const42":    BitVecVal(42, 64),
-        "mod2":       URem(x, BitVecVal(2, 64)),
-        "max_zero":   If(UGT(x, zero), x, zero),
-        "between":  If(And(UGE(x, BitVecVal(10,64)), ULE(x, BitVecVal(100,64))), BitVecVal(1,64), zero),
-        "positive": If(UGT(x, zero), BitVecVal(1,64), zero),
-        "clamp50":  If(UGT(x, BitVecVal(50,64)), BitVecVal(50,64), x),
-        "add100":   x + BitVecVal(100, 64),
-        "divby3":   UDiv(x, BitVecVal(3, 64)),
-        "mod10":    URem(x, BitVecVal(10, 64)),
-        "const0":   zero,
-        "const1":   BitVecVal(1, 64),
-        "add1":     x + BitVecVal(1, 64),
-        "max100":   If(UGT(x, BitVecVal(100,64)), x, BitVecVal(100,64)),
-        "sign":     If(x == zero, zero, BitVecVal(1,64)),
-        "factorial": If(x == zero, BitVecVal(1,64),
-                     If(x == BitVecVal(1,64), BitVecVal(1,64),
-                     If(x == BitVecVal(2,64), BitVecVal(2,64),
-                     If(x == BitVecVal(3,64), BitVecVal(6,64),
-                     If(x == BitVecVal(4,64), BitVecVal(24,64),
-                     BitVecVal(120,64)))))),
-    }
+SELFIE  = os.environ.get("SELFIE_PATH",  os.path.expanduser("~/selfie/selfie"))
+BEATOR  = os.environ.get("BEATOR_PATH",  os.path.expanduser("~/unicorn/beator"))
+BITME   = os.environ.get("BITME_PATH",   os.path.expanduser("~/unicorn/bitme"))
 
-def _violation(check_statement, result_expr, x):
-    zero = BitVecVal(0, 64)
-    conditions = {
-        # IMPORTANT: longer patterns must come before shorter ones
-        # to prevent substring false matches e.g. "result > 1" matching "result > 10"
-        "result > 100" : UGT(result_expr, BitVecVal(100, 64)),
-        "result > 42"  : UGT(result_expr, BitVecVal(42, 64)),
-        "result > 10"  : UGT(result_expr, BitVecVal(10, 64)),
-        "result > 1"   : UGT(result_expr, BitVecVal(1, 64)),
-        "result <= 42" : ULE(result_expr, BitVecVal(42, 64)),
-        "result <= 0"  : ULE(result_expr, zero),
-        "result >= x"  : UGE(result_expr, x),
-        "result != 0"  : result_expr != zero,
-        "result != x"  : result_expr != x,
-        "result == 0"  : result_expr == zero,
-        "result == x"  : result_expr == x,
-        "result < 0"   : ULT(result_expr, zero),
-        "result > x"   : UGT(result_expr, x),
-        "result > 50"  : UGT(result_expr, BitVecVal(50, 64)),
-        "result != 1"  : result_expr != BitVecVal(1, 64),
-        "result == 1"  : result_expr == BitVecVal(1, 64),
-    }
-    for pattern, expr in conditions.items():
-        if pattern in check_statement:
-            return expr
-    return None
+# Bound k for bounded model checking (can be overridden per-call)
+DEFAULT_KMAX = int(os.environ.get("DOCCHECK_KMAX", "100"))
 
-def compile_source(source):
-    with open("/tmp/patched.c", "w") as f:
+PATCHED_C    = "/tmp/doccheck_patched.c"
+PATCHED_BIN  = "/tmp/doccheck_patched.bin"
+PATCHED_BTOR = "/tmp/doccheck_patched.btor2"
+
+
+# ---------------------------------------------------------------------------
+# Step 1 — compile with starc
+# ---------------------------------------------------------------------------
+
+def compile_source(source: str) -> tuple[bool, str]:
+    """
+    Write *source* to a temp file and compile it with starc (Selfie).
+
+    Returns:
+        (success: bool, compiler_output: str)
+    """
+    with open(PATCHED_C, "w") as f:
         f.write(source)
+
     result = subprocess.run(
-        [SELFIE, "-c", "/tmp/patched.c", "-o", "/tmp/patched.bin"],
-        capture_output=True, text=True
+        [SELFIE, "-c", PATCHED_C, "-o", PATCHED_BIN],
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
-    if "syntax error" in result.stdout:
-        return False, result.stdout
-    return True, result.stdout
+    combined = result.stdout + result.stderr
 
-def _find_small_witness(check_statement, function_name):
-    """Try small inputs 0-20 to find a human-readable counterexample."""
-    for val in range(100):
-        x_concrete = BitVecVal(val, 64)
-        b_concrete  = BitVecVal(42, 64)
-        models = _models(x_concrete, b_concrete)
-        if function_name not in models:
-            return None
-        result_val = models[function_name]
-        violation  = _violation(check_statement, result_val, x_concrete)
-        if violation is None:
-            return None
-        s = Solver()
-        s.add(violation)
-        if s.check() == sat:
-            return val
-    return None
+    if result.returncode != 0 or "syntax error" in combined.lower():
+        return False, combined
 
-def verify_with_z3(check_statement, function_name):
-    x    = BitVec('x', 64)
-    b42  = BitVecVal(42, 64)   # concrete second arg for two-param functions
-    models = _models(x, b42)
-    if function_name not in models:
-        return {
-            "verdict": "UNKNOWN",
-            "witness": None,
-            "error": f"No Z3 model for '{function_name}'. Add it to verify.py."
-        }
-    result_expr = models[function_name]
-    violation   = _violation(check_statement, result_expr, x)
-    if violation is None:
-        return {
-            "verdict": "UNKNOWN",
-            "witness": None,
-            "error": f"Cannot parse condition: {check_statement}"
-        }
-    solver = Solver()
-    solver.add(violation)
-    outcome = solver.check()
-    if outcome == sat:
-        val     = solver.model().eval(x, model_completion=True)
-        witness = val.as_long() if hasattr(val, 'as_long') else str(val)
-        small   = _find_small_witness(check_statement, function_name)
-        display = small if small is not None else witness
-        return {"verdict": "FALSIFIED", "witness": display, "error": None}
-    elif outcome == unsat:
+    return True, combined
+
+
+# ---------------------------------------------------------------------------
+# Step 2 — run beator to produce BTOR2
+# ---------------------------------------------------------------------------
+
+def run_beator(kmax: int = DEFAULT_KMAX) -> tuple[bool, str]:
+    """
+    Run beator on the compiled binary to produce a BTOR2 model.
+
+    Args:
+        kmax : loop unrolling / step bound
+
+    Returns:
+        (success: bool, output: str)
+    """
+    if not os.path.exists(PATCHED_BIN):
+        return False, f"Binary not found: {PATCHED_BIN}"
+
+    result = subprocess.run(
+        [BEATOR, "-kmax", str(kmax), PATCHED_BIN, "-o", PATCHED_BTOR],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    combined = result.stdout + result.stderr
+
+    if result.returncode != 0 or not os.path.exists(PATCHED_BTOR):
+        return False, combined
+
+    return True, combined
+
+
+# ---------------------------------------------------------------------------
+# Step 3 — run bitme (Z3 back-end) on the BTOR2 model
+# ---------------------------------------------------------------------------
+
+def _parse_bitme_output(output: str) -> dict:
+    """
+    Parse bitme / btor2tools stdout to extract verdict and witness.
+
+    bitme prints one of:
+        sat
+        unsat
+        unknown
+    and on SAT it also prints a witness block like:
+        ; witness 1
+        1 <value> <node-name>
+        ...
+    We extract the concrete value assigned to the symbolic input
+    (node name contains 'read' or 'input' or is simply the first state
+    assignment).
+    """
+    output_lower = output.lower()
+
+    if "unsat" in output_lower:
         return {"verdict": "VERIFIED", "witness": None, "error": None}
-    else:
-        return {"verdict": "UNKNOWN", "witness": None, "error": "Z3 returned unknown"}
+
+    if "sat" in output_lower:
+        # Try to extract the concrete input value from the witness block.
+        # bitme prints lines like:  1 <hex_or_dec> input_x
+        witness = None
+        for line in output.splitlines():
+            # Match lines that look like: <step> <value> <name>
+            m = re.match(r'^\d+\s+(\S+)\s+\S*(?:input|read|x)\S*', line, re.IGNORECASE)
+            if m:
+                raw = m.group(1)
+                try:
+                    witness = int(raw, 16) if raw.startswith(('0x', '0b')) else int(raw)
+                except ValueError:
+                    witness = raw
+                break
+
+        # Fall back: grab first numeric assignment anywhere in witness block
+        if witness is None:
+            m = re.search(r'^\d+\s+(\d+)', output, re.MULTILINE)
+            if m:
+                try:
+                    witness = int(m.group(1))
+                except ValueError:
+                    pass
+
+        return {"verdict": "FALSIFIED", "witness": witness, "error": None}
+
+    if "unknown" in output_lower:
+        return {
+            "verdict": "UNKNOWN",
+            "witness": None,
+            "error": f"bitme returned unknown — try increasing kmax (current: {DEFAULT_KMAX})",
+        }
+
+    return {
+        "verdict": "UNKNOWN",
+        "witness": None,
+        "error": f"Could not parse bitme output:\n{output[:400]}",
+    }
+
+
+def verify_btor2(kmax: int = DEFAULT_KMAX) -> dict:
+    """
+    Run bitme on the BTOR2 file and return a result dict.
+
+    Returns:
+        {
+          "verdict" : "VERIFIED" | "FALSIFIED" | "UNKNOWN",
+          "witness" : int | str | None,
+          "error"   : str | None,
+        }
+    """
+    if not os.path.exists(PATCHED_BTOR):
+        return {
+            "verdict": "UNKNOWN",
+            "witness": None,
+            "error": f"BTOR2 file not found: {PATCHED_BTOR}",
+        }
+
+    result = subprocess.run(
+        [BITME, "--kmax", str(kmax), PATCHED_BTOR],
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    combined = result.stdout + result.stderr
+    return _parse_bitme_output(combined)
+
+
+# ---------------------------------------------------------------------------
+# Top-level convenience used by pipeline.py and run_benchmark.py
+# ---------------------------------------------------------------------------
+
+def verify_with_toolchain(source: str, kmax: int = DEFAULT_KMAX) -> dict:
+    """
+    Full end-to-end verification:
+      compile → beator → bitme → result dict
+
+    Args:
+        source : complete patched C* source (violation check already injected)
+        kmax   : bound for model checking
+
+    Returns:
+        result dict with keys: verdict, witness, error
+    """
+    ok, out = compile_source(source)
+    if not ok:
+        return {"verdict": "COMPILE_ERROR", "witness": None, "error": out[:400]}
+
+    ok, out = run_beator(kmax)
+    if not ok:
+        return {"verdict": "BEATOR_ERROR", "witness": None, "error": out[:400]}
+
+    return verify_btor2(kmax)
