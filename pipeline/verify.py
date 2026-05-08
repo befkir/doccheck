@@ -1,10 +1,10 @@
 """
-verify.py — symbolic verification using the real Selfie/Unicorn toolchain.
+verify.py — symbolic verification using Selfie monster + Z3 CLI.
 
 Pipeline:
-  1. compile_source()  : starc  → RISC-V binary  (/tmp/patched.bin)
-  2. run_beator()      : beator → BTOR2 model     (/tmp/patched.btor2)
-  3. verify_btor2()    : bitme  → SAT / UNSAT + witness
+  1. compile_source()  : write patched C* to /tmp/doccheck_patched.c
+  2. run_monster()     : monster → /tmp/doccheck_patched.smt
+  3. verify_smt()      : extract the exit(1) push/pop block, solve with z3
 
 Shared pipeline component. Do not modify without team agreement.
 """
@@ -14,195 +14,162 @@ import os
 import re
 
 # ---------------------------------------------------------------------------
-# Tool paths — override with env vars if tools live elsewhere
+# Tool paths
 # ---------------------------------------------------------------------------
 
-SELFIE  = os.environ.get("SELFIE_PATH",  os.path.expanduser("~/selfie/selfie"))
-BEATOR  = os.environ.get("BEATOR_PATH",  os.path.expanduser("~/unicorn/beator"))
-BITME   = os.environ.get("BITME_PATH",   os.path.expanduser("~/unicorn/bitme"))
+MONSTER = os.environ.get("MONSTER_PATH", os.path.expanduser("~/selfie/monster"))
+Z3      = os.environ.get("Z3_PATH",      "z3")
 
-# Bound k for bounded model checking (can be overridden per-call)
-DEFAULT_KMAX = int(os.environ.get("DOCCHECK_KMAX", "100"))
+DEFAULT_DEPTH = int(os.environ.get("DOCCHECK_DEPTH", "10000"))
 
 PATCHED_C    = "/tmp/doccheck_patched.c"
-PATCHED_BIN  = "/tmp/doccheck_patched.bin"
-PATCHED_BTOR = "/tmp/doccheck_patched.btor2"
+PATCHED_SMT  = "/tmp/doccheck_patched.smt"
+QUERY_SMT    = "/tmp/doccheck_query.smt"
 
 
 # ---------------------------------------------------------------------------
-# Step 1 — compile with starc
+# Step 1
 # ---------------------------------------------------------------------------
 
 def compile_source(source: str) -> tuple[bool, str]:
-    """
-    Write *source* to a temp file and compile it with starc (Selfie).
-
-    Returns:
-        (success: bool, compiler_output: str)
-    """
     with open(PATCHED_C, "w") as f:
         f.write(source)
+    return True, "OK"
+
+
+# ---------------------------------------------------------------------------
+# Step 2
+# ---------------------------------------------------------------------------
+
+def run_monster(depth: int = DEFAULT_DEPTH) -> tuple[bool, str]:
+    if not os.path.exists(PATCHED_C):
+        return False, f"Source file not found: {PATCHED_C}"
+
+    if os.path.exists(PATCHED_SMT):
+        os.remove(PATCHED_SMT)
 
     result = subprocess.run(
-        [SELFIE, "-c", PATCHED_C, "-o", PATCHED_BIN],
-        capture_output=True,
-        text=True,
-        timeout=60,
+        [MONSTER, "-c", PATCHED_C, "-", "0", str(depth), "--merge-enabled"],
+        capture_output=True, text=True, timeout=120,
     )
     combined = result.stdout + result.stderr
 
-    if result.returncode != 0 or "syntax error" in combined.lower():
-        return False, combined
+    if not os.path.exists(PATCHED_SMT):
+        return False, f"Monster did not produce SMT file.\n{combined[:400]}"
 
     return True, combined
 
 
 # ---------------------------------------------------------------------------
-# Step 2 — run beator to produce BTOR2
+# Step 3
 # ---------------------------------------------------------------------------
 
-def run_beator(kmax: int = DEFAULT_KMAX) -> tuple[bool, str]:
-    """
-    Run beator on the compiled binary to produce a BTOR2 model.
+def _extract_push_pop_blocks(smt: str) -> list[str]:
+    """Return the content of each (push 1)...(pop 1) block as a list."""
+    blocks = []
+    i = 0
+    lines = smt.splitlines(keepends=True)
+    n = len(lines)
+    while i < n:
+        if lines[i].strip().startswith("(push"):
+            block = []
+            i += 1
+            while i < n and not lines[i].strip().startswith("(pop"):
+                block.append(lines[i])
+                i += 1
+            blocks.append("".join(block))
+        i += 1
+    return blocks
 
-    Args:
-        kmax : loop unrolling / step bound
 
-    Returns:
-        (success: bool, output: str)
-    """
-    if not os.path.exists(PATCHED_BIN):
-        return False, f"Binary not found: {PATCHED_BIN}"
+def _preamble(smt: str) -> str:
+    """Everything before the first (push 1)."""
+    idx = smt.find("(push")
+    return smt[:idx] if idx != -1 else smt
+
+
+def _solve_block(preamble: str, block: str) -> str:
+    """Write preamble + assert block to a temp file and run z3. Returns stdout+stderr."""
+    query = preamble + "(push 1)\n" + block + "(pop 1)\n"
+    with open(QUERY_SMT, "w") as f:
+        f.write(query)
 
     result = subprocess.run(
-        [BEATOR, "-kmax", str(kmax), PATCHED_BIN, "-o", PATCHED_BTOR],
-        capture_output=True,
-        text=True,
-        timeout=120,
+        [Z3, QUERY_SMT],
+        capture_output=True, text=True, timeout=300,
     )
-    combined = result.stdout + result.stderr
-
-    if result.returncode != 0 or not os.path.exists(PATCHED_BTOR):
-        return False, combined
-
-    return True, combined
+    return result.stdout + result.stderr
 
 
-# ---------------------------------------------------------------------------
-# Step 3 — run bitme (Z3 back-end) on the BTOR2 model
-# ---------------------------------------------------------------------------
+def _parse_z3_output(output: str) -> str:
+    """Return 'sat', 'unsat', or 'unknown' from z3 output."""
+    for line in output.splitlines():
+        stripped = line.strip().lower()
+        if stripped in ("sat", "unsat", "unknown"):
+            return stripped
+    return "unknown"
 
-def _parse_bitme_output(output: str) -> dict:
+
+def _extract_witness(output: str) -> int | str | None:
+    """Pull i0 value from a z3 sat model."""
+    m = re.search(r'define-fun\s+i0\s*\(\)\s*\(_\s*BitVec\s*\d+\)\s*#x([0-9a-fA-F]+)', output)
+    if m:
+        return int(m.group(1), 16)
+    m = re.search(r'define-fun\s+i0\s*\(\)\s*\(_\s*BitVec\s*\d+\)\s*\(_\s*bv(\d+)', output)
+    if m:
+        return int(m.group(1))
+    m = re.search(r'#x([0-9a-fA-F]+)', output)
+    if m:
+        return int(m.group(1), 16)
+    return None
+
+
+def verify_smt() -> dict:
     """
-    Parse bitme / btor2tools stdout to extract verdict and witness.
+    Monster emits one push/pop block per exit() call:
+      - block 0: exit(1)  → violation reachable?  sat=FALSIFIED, unsat=VERIFIED
+      - block 1: exit(0)  → normal exit (ignore)
 
-    bitme prints one of:
-        sat
-        unsat
-        unknown
-    and on SAT it also prints a witness block like:
-        ; witness 1
-        1 <value> <node-name>
-        ...
-    We extract the concrete value assigned to the symbolic input
-    (node name contains 'read' or 'input' or is simply the first state
-    assignment).
+    We solve only block 0.
     """
-    output_lower = output.lower()
+    if not os.path.exists(PATCHED_SMT):
+        return {"verdict": "UNKNOWN", "witness": None,
+                "error": f"SMT file not found: {PATCHED_SMT}"}
 
-    if "unsat" in output_lower:
+    with open(PATCHED_SMT) as f:
+        smt = f.read()
+
+    # Strip :incremental option (unsupported by this z3 version)
+    smt = re.sub(r'\(set-option\s+:incremental[^)]*\)\n?', '', smt)
+
+    preamble = _preamble(smt)
+    blocks   = _extract_push_pop_blocks(smt)
+
+    if not blocks:
+        return {"verdict": "UNKNOWN", "witness": None,
+                "error": "No push/pop blocks found in SMT file."}
+
+    # Block 0 is the exit(1) / violation path
+    output = _solve_block(preamble, blocks[0])
+    verdict_str = _parse_z3_output(output)
+
+    if verdict_str == "unsat":
         return {"verdict": "VERIFIED", "witness": None, "error": None}
 
-    if "sat" in output_lower:
-        # Try to extract the concrete input value from the witness block.
-        # bitme prints lines like:  1 <hex_or_dec> input_x
-        witness = None
-        for line in output.splitlines():
-            # Match lines that look like: <step> <value> <name>
-            m = re.match(r'^\d+\s+(\S+)\s+\S*(?:input|read|x)\S*', line, re.IGNORECASE)
-            if m:
-                raw = m.group(1)
-                try:
-                    witness = int(raw, 16) if raw.startswith(('0x', '0b')) else int(raw)
-                except ValueError:
-                    witness = raw
-                break
+    if verdict_str == "sat":
+        return {"verdict": "FALSIFIED", "witness": _extract_witness(output), "error": None}
 
-        # Fall back: grab first numeric assignment anywhere in witness block
-        if witness is None:
-            m = re.search(r'^\d+\s+(\d+)', output, re.MULTILINE)
-            if m:
-                try:
-                    witness = int(m.group(1))
-                except ValueError:
-                    pass
-
-        return {"verdict": "FALSIFIED", "witness": witness, "error": None}
-
-    if "unknown" in output_lower:
-        return {
-            "verdict": "UNKNOWN",
-            "witness": None,
-            "error": f"bitme returned unknown — try increasing kmax (current: {DEFAULT_KMAX})",
-        }
-
-    return {
-        "verdict": "UNKNOWN",
-        "witness": None,
-        "error": f"Could not parse bitme output:\n{output[:400]}",
-    }
-
-
-def verify_btor2(kmax: int = DEFAULT_KMAX) -> dict:
-    """
-    Run bitme on the BTOR2 file and return a result dict.
-
-    Returns:
-        {
-          "verdict" : "VERIFIED" | "FALSIFIED" | "UNKNOWN",
-          "witness" : int | str | None,
-          "error"   : str | None,
-        }
-    """
-    if not os.path.exists(PATCHED_BTOR):
-        return {
-            "verdict": "UNKNOWN",
-            "witness": None,
-            "error": f"BTOR2 file not found: {PATCHED_BTOR}",
-        }
-
-    result = subprocess.run(
-        [BITME, "--kmax", str(kmax), PATCHED_BTOR],
-        capture_output=True,
-        text=True,
-        timeout=300,
-    )
-    combined = result.stdout + result.stderr
-    return _parse_bitme_output(combined)
+    return {"verdict": "UNKNOWN", "witness": None,
+            "error": f"Z3 returned unknown.\n{output[:300]}"}
 
 
 # ---------------------------------------------------------------------------
-# Top-level convenience used by pipeline.py and run_benchmark.py
+# Top-level
 # ---------------------------------------------------------------------------
 
-def verify_with_toolchain(source: str, kmax: int = DEFAULT_KMAX) -> dict:
-    """
-    Full end-to-end verification:
-      compile → beator → bitme → result dict
-
-    Args:
-        source : complete patched C* source (violation check already injected)
-        kmax   : bound for model checking
-
-    Returns:
-        result dict with keys: verdict, witness, error
-    """
-    ok, out = compile_source(source)
-    if not ok:
-        return {"verdict": "COMPILE_ERROR", "witness": None, "error": out[:400]}
-
-    ok, out = run_beator(kmax)
+def verify_with_toolchain(source: str, kmax: int = DEFAULT_DEPTH) -> dict:
+    compile_source(source)
+    ok, out = run_monster(kmax)
     if not ok:
         return {"verdict": "BEATOR_ERROR", "witness": None, "error": out[:400]}
-
-    return verify_btor2(kmax)
+    return verify_smt()

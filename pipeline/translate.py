@@ -12,6 +12,7 @@ Interface contract (all branches):
 
 import os
 import json
+import re
 import urllib.request
 import urllib.error
 
@@ -30,15 +31,23 @@ def _load_prompt(function_source: str, claim: str) -> str:
     return template.format(function_source=function_source, claim=claim)
 
 
-def _normalise_response(raw: str) -> str:
+def _normalise_response(raw: str, func_name: str, param_names: list[str]) -> str:
     """Strip markdown fences and common LLM noise from a raw response."""
     line = raw.strip().split('\n')[0].strip()
     # Remove markdown code fences if the LLM wrapped the output
     if line.startswith("```"):
         line = line.lstrip("`").strip()
-    line = line.replace("absolute(x)", "result")
-    line = line.replace("absolute(*x)", "result")
-    line = line.replace("*x", "x")
+
+    # Dynamically replace any call to the target function with 'result'
+    # e.g. "absolute(x)" -> "result", "max(*x_ptr, *y_ptr)" -> "result"
+    if func_name:
+        pattern = re.compile(rf'{re.escape(func_name)}\s*\([^)]*\)')
+        line = pattern.sub("result", line)
+
+    # Clean up potential LLM pointer-confusion for any parameter
+    for pname in param_names:
+        line = line.replace(f"*{pname}", pname)
+
     return line
 
 
@@ -50,7 +59,7 @@ OLLAMA_URL   = os.environ.get("OLLAMA_URL",   "http://172.27.0.1:11434/api/gener
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5-coder:3b")
 
 
-def _translate_ollama(function_source: str, claim: str) -> str:
+def _translate_ollama(function_source: str, claim: str, func_name: str, param_names: list[str]) -> str:
     prompt = _load_prompt(function_source, claim)
     payload = json.dumps({
         "model":  OLLAMA_MODEL,
@@ -66,7 +75,7 @@ def _translate_ollama(function_source: str, claim: str) -> str:
     with urllib.request.urlopen(req, timeout=60) as resp:
         data = json.loads(resp.read())
 
-    return _normalise_response(data["response"])
+    return _normalise_response(data["response"], func_name, param_names)
 
 
 # ---------------------------------------------------------------------------
@@ -78,7 +87,7 @@ OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "openai/gpt-4o-mini")
 OPENROUTER_KEY   = os.environ.get("OPENROUTER_API_KEY", "")
 
 
-def _translate_openrouter(function_source: str, claim: str) -> str:
+def _translate_openrouter(function_source: str, claim: str, func_name: str, param_names: list[str]) -> str:
     if not OPENROUTER_KEY:
         raise EnvironmentError("OPENROUTER_API_KEY is not set.")
 
@@ -101,7 +110,7 @@ def _translate_openrouter(function_source: str, claim: str) -> str:
         data = json.loads(resp.read())
 
     raw = data["choices"][0]["message"]["content"]
-    return _normalise_response(raw)
+    return _normalise_response(raw, func_name, param_names)
 
 
 # ---------------------------------------------------------------------------
@@ -113,7 +122,7 @@ CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-20250514")
 CLAUDE_KEY   = os.environ.get("ANTHROPIC_API_KEY", "")
 
 
-def _translate_claude(function_source: str, claim: str) -> str:
+def _translate_claude(function_source: str, claim: str, func_name: str, param_names: list[str]) -> str:
     if not CLAUDE_KEY:
         raise EnvironmentError("ANTHROPIC_API_KEY is not set.")
 
@@ -137,7 +146,7 @@ def _translate_claude(function_source: str, claim: str) -> str:
         data = json.loads(resp.read())
 
     raw = data["content"][0]["text"]
-    return _normalise_response(raw)
+    return _normalise_response(raw, func_name, param_names)
 
 
 # ---------------------------------------------------------------------------
@@ -153,7 +162,7 @@ _BACKENDS = {
 DOCCHECK_BACKEND = os.environ.get("DOCCHECK_BACKEND", "ollama").lower()
 
 
-def translate_claim(function_source: str, claim: str) -> str:
+def translate_claim(function_source: str, claim: str, func_name: str = "", param_names: list[str] = None) -> str:
     """
     Translate a natural language claim into a C* violation check statement.
 
@@ -165,18 +174,23 @@ def translate_claim(function_source: str, claim: str) -> str:
     Args:
         function_source : full C* function source code
         claim           : English claim e.g. "never returns a negative value"
+        func_name       : name of the function (used for response normalization)
+        param_names     : list of parameter names (used for response normalization)
 
     Returns:
-        C* if-statement string e.g. "if (result < 0) { return 1; }"
+        C* if-statement string e.g. "if (result < 0) { exit(1); }"
 
     Raises:
         KeyError           if DOCCHECK_BACKEND is not a known backend
         EnvironmentError   if a required API key is missing
         urllib.error.URLError / OSError on network failure
     """
+    if param_names is None:
+        param_names = []
+
     if DOCCHECK_BACKEND not in _BACKENDS:
         raise KeyError(
             f"Unknown backend '{DOCCHECK_BACKEND}'. "
             f"Choose one of: {', '.join(_BACKENDS)}"
         )
-    return _BACKENDS[DOCCHECK_BACKEND](function_source, claim)
+    return _BACKENDS[DOCCHECK_BACKEND](function_source, claim, func_name, param_names)

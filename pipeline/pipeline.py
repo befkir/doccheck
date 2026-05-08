@@ -16,7 +16,7 @@ import argparse
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pipeline.translate import translate_claim
-from pipeline.inject    import inject_check
+from pipeline.inject    import inject_check, parse_signature
 from pipeline.verify    import verify_with_toolchain
 
 
@@ -39,9 +39,17 @@ def check(function_source: str, claim: str, function_name: str, kmax: int = 100)
     print(f"Claim    : {claim}")
     print(f"kmax     : {kmax}")
 
+    # Step 0 — parse signature
+    try:
+        real_func_name, params = parse_signature(function_source)
+        param_names = [p[1] for p in params]
+    except Exception as exc:
+        print(f"Verdict  : ERROR — could not parse signature: {exc}")
+        return {"verdict": "ERROR", "witness": None, "error": str(exc)}
+
     # Step 1 — translate claim → C* violation check
     try:
-        check_stmt = translate_claim(function_source, claim)
+        check_stmt = translate_claim(function_source, claim, real_func_name, param_names)
     except Exception as exc:
         print(f"Verdict  : ERROR — LLM translation failed: {exc}")
         return {"verdict": "ERROR", "witness": None, "error": str(exc)}
