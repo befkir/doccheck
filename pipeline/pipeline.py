@@ -15,7 +15,7 @@ import argparse
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from pipeline.translate import translate_claim
+from pipeline.translate import translate_claim, explain_result
 from pipeline.inject    import inject_check, parse_signature
 from pipeline.verify    import verify_with_toolchain
 
@@ -69,14 +69,52 @@ def check(function_source: str, claim: str, function_name: str, kmax: int = 100)
     verdict = result["verdict"]
     if verdict == "VERIFIED":
         print(f"Verdict  : VERIFIED ✓  — proved for ALL inputs within bound k={kmax} (UNSAT)")
+        print(f"Proof    : {result.get('proof', 'Formal SMT proof')}")
+        
+        formula = result.get("formula")
+        if formula:
+            print("Mathematical Formula:")
+            # Limit length to avoid wall of text
+            if len(formula) > 500:
+                print(f"  {formula[:500]} ... [truncated]")
+            else:
+                print(f"  {formula}")
     elif verdict == "FALSIFIED":
-        w = result["witness"]
-        print(f"Verdict  : FALSIFIED ✗ — claim broken by input x = {w}")
+        print(f"Verdict  : FALSIFIED ✗ — claim broken")
+        print(f"Proof    : {result.get('proof', 'SMT counter-example found')}")
+        
+        # Display the model (counter-example values)
+        model = result.get("model", {})
+        if model:
+            print("Counter-example Trace:")
+            for i, val in model.items():
+                try:
+                    idx = int(i[1:])
+                    pname = param_names[idx] if idx < len(param_names) else f"input_{idx}"
+                    print(f"  {pname} = {val}")
+                except:
+                    print(f"  {i} = {val}")
     elif verdict in ("COMPILE_ERROR", "BEATOR_ERROR"):
         print(f"Verdict  : {verdict}")
         print(f"Detail   : {result['error'][:300]}")
     else:
         print(f"Verdict  : UNKNOWN — {result.get('error', 'no details')}")
+
+    # Step 6 — explain result (new)
+    print("\n" + "=" * 60)
+    print("AI Explanation & Proof")
+    print("=" * 60)
+    try:
+        explanation = explain_result(
+            source=function_source,
+            claim=claim,
+            verdict=verdict,
+            model=result.get("model"),
+            formula=result.get("formula")
+        )
+        print(explanation)
+    except Exception as exc:
+        print(f"Error generating explanation: {exc}")
 
     return result
 

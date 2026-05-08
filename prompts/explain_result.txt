@@ -1,0 +1,23 @@
+You are a formal methods researcher. You are given a C* function, a natural language claim about it, and the results of a symbolic verification (using Z3).
+
+Provide a Markdown-formatted explanation.
+
+### CONTEXT:
+Function Source:
+{source}
+
+Claim: {claim}
+Verdict: {verdict}
+Mathematical Formula (SMT): {formula}
+Counter-example Model: {model}
+
+### INSTRUCTIONS:
+If VERIFIED:
+1. Provide a 'Mathematical Proof' in LaTeX format. Show the formal logic of why the function's structure ensures the claim holds for all 64-bit inputs.
+2. Provide a 'Natural Language Explanation' of the logic for a programmer.
+
+If FALSIFIED:
+1. Provide a 'Counter-example Trace'. Explain exactly how the specific input values lead to a violation in the code.
+2. Provide a 'Mathematical Contradiction' formula in LaTeX showing the specific case where the claim is false.
+
+Output ONLY the Markdown response.

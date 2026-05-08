@@ -13,6 +13,11 @@ import subprocess
 import os
 import re
 
+try:
+    import z3
+except ImportError:
+    z3 = None
+
 # ---------------------------------------------------------------------------
 # Tool paths
 # ---------------------------------------------------------------------------
@@ -90,7 +95,8 @@ def _preamble(smt: str) -> str:
 
 def _solve_block(preamble: str, block: str) -> str:
     """Write preamble + assert block to a temp file and run z3. Returns stdout+stderr."""
-    query = preamble + "(push 1)\n" + block + "(pop 1)\n"
+    # check-sat is usually already there, but get-model ensures we get the witness
+    query = preamble + "(push 1)\n" + block + "(check-sat)\n(get-model)\n(pop 1)\n"
     with open(QUERY_SMT, "w") as f:
         f.write(query)
 
@@ -110,18 +116,20 @@ def _parse_z3_output(output: str) -> str:
     return "unknown"
 
 
-def _extract_witness(output: str) -> int | str | None:
-    """Pull i0 value from a z3 sat model."""
-    m = re.search(r'define-fun\s+i0\s*\(\)\s*\(_\s*BitVec\s*\d+\)\s*#x([0-9a-fA-F]+)', output)
-    if m:
-        return int(m.group(1), 16)
-    m = re.search(r'define-fun\s+i0\s*\(\)\s*\(_\s*BitVec\s*\d+\)\s*\(_\s*bv(\d+)', output)
-    if m:
-        return int(m.group(1))
-    m = re.search(r'#x([0-9a-fA-F]+)', output)
-    if m:
-        return int(m.group(1), 16)
-    return None
+def _extract_model(output: str) -> dict[str, int]:
+    """Pull all iN values from a z3 sat model."""
+    model = {}
+    # Match i0, i1, i2...
+    matches = re.finditer(r'define-fun\s+(i\d+)\s*\(\)\s*\(_\s*BitVec\s*\d+\)\s*#x([0-9a-fA-F]+)', output)
+    for m in matches:
+        model[m.group(1)] = int(m.group(2), 16)
+    
+    # Also match decimal format if present
+    matches = re.finditer(r'define-fun\s+(i\d+)\s*\(\)\s*\(_\s*BitVec\s*\d+\)\s*\(_\s*bv(\d+)', output)
+    for m in matches:
+        model[m.group(1)] = int(m.group(2))
+        
+    return model
 
 
 def verify_smt() -> dict:
@@ -154,12 +162,39 @@ def verify_smt() -> dict:
     verdict_str = _parse_z3_output(output)
 
     if verdict_str == "unsat":
-        return {"verdict": "VERIFIED", "witness": None, "error": None}
+        pretty_formula = None
+        if z3:
+            try:
+                # Attempt to pretty-print the constraints
+                # We combine preamble and the violation block
+                full_smt = preamble + "(push 1)\n" + blocks[0] + "(pop 1)"
+                # Remove incremental/set-logic calls that might confuse the parser
+                clean_smt = re.sub(r'\(set-logic [^)]*\)', '', full_smt)
+                f = z3.parse_smt2_string(clean_smt)
+                pretty_formula = str(f)
+            except Exception as e:
+                pretty_formula = f"[Error parsing SMT: {e}]"
+
+        return {
+            "verdict": "VERIFIED", 
+            "witness": None, 
+            "model": None,
+            "formula": pretty_formula,
+            "proof": "Exhaustive state-space search proved unsatisfiable (UNSAT).",
+            "error": None
+        }
 
     if verdict_str == "sat":
-        return {"verdict": "FALSIFIED", "witness": _extract_witness(output), "error": None}
+        model = _extract_model(output)
+        return {
+            "verdict": "FALSIFIED", 
+            "witness": model.get("i0"), 
+            "model": model,
+            "proof": "Found a satisfying assignment (SAT) that reaches exit(1).",
+            "error": None
+        }
 
-    return {"verdict": "UNKNOWN", "witness": None,
+    return {"verdict": "UNKNOWN", "witness": None, "model": None,
             "error": f"Z3 returned unknown.\n{output[:300]}"}
 
 

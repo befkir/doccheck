@@ -20,15 +20,14 @@ import urllib.error
 # Shared prompt loading
 # ---------------------------------------------------------------------------
 
-_PROMPT_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "prompts", "claim_to_assert.txt"
-)
-
-def _load_prompt(function_source: str, claim: str) -> str:
-    with open(_PROMPT_PATH) as f:
+def _load_prompt(template_name: str, **kwargs) -> str:
+    path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "prompts", template_name
+    )
+    with open(path) as f:
         template = f.read()
-    return template.format(function_source=function_source, claim=claim)
+    return template.format(**kwargs)
 
 
 def _normalise_response(raw: str, func_name: str, param_names: list[str]) -> str:
@@ -38,10 +37,11 @@ def _normalise_response(raw: str, func_name: str, param_names: list[str]) -> str
     if line.startswith("```"):
         line = line.lstrip("`").strip()
 
-    # Dynamically replace any call to the target function with 'result'
-    # e.g. "absolute(x)" -> "result", "max(*x_ptr, *y_ptr)" -> "result"
+    # Dynamically replace any call to the target function (or 'abs') with 'result'
+    # e.g. "absolute(x)" -> "result", "abs(x)" -> "result"
     if func_name:
-        pattern = re.compile(rf'{re.escape(func_name)}\s*\([^)]*\)')
+        synonyms = [re.escape(func_name), "abs"]
+        pattern = re.compile(rf'({"|".join(synonyms)})\s*\([^)]*\)')
         line = pattern.sub("result", line)
 
     # Clean up potential LLM pointer-confusion for any parameter
@@ -52,145 +52,81 @@ def _normalise_response(raw: str, func_name: str, param_names: list[str]) -> str
 
 
 # ---------------------------------------------------------------------------
-# Backend: Ollama (local)
+# Backend Configurations
 # ---------------------------------------------------------------------------
 
-OLLAMA_URL   = os.environ.get("OLLAMA_URL",   "http://172.27.0.1:11434/api/generate")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5-coder:3b")
-
-
-def _translate_ollama(function_source: str, claim: str, func_name: str, param_names: list[str]) -> str:
-    prompt = _load_prompt(function_source, claim)
-    payload = json.dumps({
-        "model":  OLLAMA_MODEL,
-        "prompt": prompt,
-        "stream": False,
-    }).encode()
-
-    req = urllib.request.Request(
-        OLLAMA_URL,
-        data=payload,
-        headers={"Content-Type": "application/json"},
-    )
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        data = json.loads(resp.read())
-
-    return _normalise_response(data["response"], func_name, param_names)
-
-
-# ---------------------------------------------------------------------------
-# Backend: OpenRouter
-# ---------------------------------------------------------------------------
+OLLAMA_URL       = os.environ.get("OLLAMA_URL",   "http://172.27.0.1:11434/api/generate")
+OLLAMA_MODEL     = os.environ.get("OLLAMA_MODEL", "qwen2.5-coder:3b")
 
 OPENROUTER_URL   = "https://openrouter.ai/api/v1/chat/completions"
 OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "openai/gpt-4o-mini")
 OPENROUTER_KEY   = os.environ.get("OPENROUTER_API_KEY", "")
 
+CLAUDE_URL       = "https://api.anthropic.com/v1/messages"
+CLAUDE_MODEL     = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-20250514")
+CLAUDE_KEY       = os.environ.get("ANTHROPIC_API_KEY", "")
 
-def _translate_openrouter(function_source: str, claim: str, func_name: str, param_names: list[str]) -> str:
-    if not OPENROUTER_KEY:
-        raise EnvironmentError("OPENROUTER_API_KEY is not set.")
 
-    prompt = _load_prompt(function_source, claim)
-    payload = json.dumps({
-        "model": OPENROUTER_MODEL,
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0,
-    }).encode()
+# ---------------------------------------------------------------------------
+# Backend: API Helpers
+# ---------------------------------------------------------------------------
 
-    req = urllib.request.Request(
-        OPENROUTER_URL,
-        data=payload,
-        headers={
-            "Content-Type":  "application/json",
-            "Authorization": f"Bearer {OPENROUTER_KEY}",
-        },
-    )
+
+def _ask_ollama(prompt: str) -> str:
+    payload = json.dumps({"model": OLLAMA_MODEL, "prompt": prompt, "stream": False}).encode()
+    req = urllib.request.Request(OLLAMA_URL, data=payload, headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=60) as resp:
-        data = json.loads(resp.read())
+        return json.loads(resp.read())["response"]
 
-    raw = data["choices"][0]["message"]["content"]
-    return _normalise_response(raw, func_name, param_names)
-
-
-# ---------------------------------------------------------------------------
-# Backend: Anthropic Claude API
-# ---------------------------------------------------------------------------
-
-CLAUDE_URL   = "https://api.anthropic.com/v1/messages"
-CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-20250514")
-CLAUDE_KEY   = os.environ.get("ANTHROPIC_API_KEY", "")
-
-
-def _translate_claude(function_source: str, claim: str, func_name: str, param_names: list[str]) -> str:
-    if not CLAUDE_KEY:
-        raise EnvironmentError("ANTHROPIC_API_KEY is not set.")
-
-    prompt = _load_prompt(function_source, claim)
-    payload = json.dumps({
-        "model":      CLAUDE_MODEL,
-        "max_tokens": 256,
-        "messages":   [{"role": "user", "content": prompt}],
-    }).encode()
-
-    req = urllib.request.Request(
-        CLAUDE_URL,
-        data=payload,
-        headers={
-            "Content-Type":      "application/json",
-            "x-api-key":         CLAUDE_KEY,
-            "anthropic-version": "2023-06-01",
-        },
-    )
+def _ask_openrouter(prompt: str) -> str:
+    if not OPENROUTER_KEY: raise EnvironmentError("OPENROUTER_API_KEY is not set.")
+    payload = json.dumps({"model": OPENROUTER_MODEL, "messages": [{"role": "user", "content": prompt}], "temperature": 0}).encode()
+    req = urllib.request.Request(OPENROUTER_URL, data=payload, headers={"Content-Type": "application/json", "Authorization": f"Bearer {OPENROUTER_KEY}"})
     with urllib.request.urlopen(req, timeout=60) as resp:
-        data = json.loads(resp.read())
+        return json.loads(resp.read())["choices"][0]["message"]["content"]
 
-    raw = data["content"][0]["text"]
-    return _normalise_response(raw, func_name, param_names)
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
-_BACKENDS = {
-    "ollama":      _translate_ollama,
-    "openrouter":  _translate_openrouter,
-    "claude":      _translate_claude,
-}
+def _ask_claude(prompt: str) -> str:
+    if not CLAUDE_KEY: raise EnvironmentError("ANTHROPIC_API_KEY is not set.")
+    payload = json.dumps({"model": CLAUDE_MODEL, "max_tokens": 1024, "messages": [{"role": "user", "content": prompt}]}).encode()
+    req = urllib.request.Request(CLAUDE_URL, data=payload, headers={"Content-Type": "application/json", "x-api-key": CLAUDE_KEY, "anthropic-version": "2023-06-01"})
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        return json.loads(resp.read())["content"][0]["text"]
 
 DOCCHECK_BACKEND = os.environ.get("DOCCHECK_BACKEND", "ollama").lower()
 
 
 def translate_claim(function_source: str, claim: str, func_name: str = "", param_names: list[str] = None) -> str:
-    """
-    Translate a natural language claim into a C* violation check statement.
+    """Translate a natural language claim into a C* violation check statement."""
+    prompt = _load_prompt("claim_to_assert.txt", function_source=function_source, claim=claim)
+    
+    if DOCCHECK_BACKEND == "ollama":
+        raw = _ask_ollama(prompt)
+    elif DOCCHECK_BACKEND == "openrouter":
+        raw = _ask_openrouter(prompt)
+    elif DOCCHECK_BACKEND == "claude":
+        raw = _ask_claude(prompt)
+    else:
+        raise KeyError(f"Unknown backend '{DOCCHECK_BACKEND}'")
+        
+    return _normalise_response(raw, func_name, param_names or [])
 
-    Backend is selected by the DOCCHECK_BACKEND environment variable:
-        ollama      (default) — requires local Ollama with llama3.2
-        openrouter            — requires OPENROUTER_API_KEY
-        claude                — requires ANTHROPIC_API_KEY
 
-    Args:
-        function_source : full C* function source code
-        claim           : English claim e.g. "never returns a negative value"
-        func_name       : name of the function (used for response normalization)
-        param_names     : list of parameter names (used for response normalization)
+def explain_result(source: str, claim: str, verdict: str, model: dict = None, formula: str = None) -> str:
+    """Generate a Markdown explanation of the verification result."""
+    prompt = _load_prompt(
+        "explain_result.txt", 
+        source=source, 
+        claim=claim, 
+        verdict=verdict, 
+        model=json.dumps(model, indent=2) if model else "N/A", 
+        formula=formula or "N/A"
+    )
 
-    Returns:
-        C* if-statement string e.g. "if (result < 0) { exit(1); }"
-
-    Raises:
-        KeyError           if DOCCHECK_BACKEND is not a known backend
-        EnvironmentError   if a required API key is missing
-        urllib.error.URLError / OSError on network failure
-    """
-    if param_names is None:
-        param_names = []
-
-    if DOCCHECK_BACKEND not in _BACKENDS:
-        raise KeyError(
-            f"Unknown backend '{DOCCHECK_BACKEND}'. "
-            f"Choose one of: {', '.join(_BACKENDS)}"
-        )
-    return _BACKENDS[DOCCHECK_BACKEND](function_source, claim, func_name, param_names)
+    if DOCCHECK_BACKEND == "ollama":
+        return _ask_ollama(prompt)
+    elif DOCCHECK_BACKEND == "openrouter":
+        return _ask_openrouter(prompt)
+    elif DOCCHECK_BACKEND == "claude":
+        return _ask_claude(prompt)
+    
+    return "LLM Explanation unavailable."
