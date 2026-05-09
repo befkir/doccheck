@@ -30,30 +30,93 @@ def _load_prompt(template_name: str, **kwargs) -> str:
     return template.format(**kwargs)
 
 
-def _normalise_response(raw: str, func_name: str, param_names: list[str]) -> str:
-    """Strip markdown fences and common LLM noise from a raw response."""
+def _normalise_property(raw: str) -> str:
+    """Strip markdown fences and common LLM noise from a semantic property."""
     line = raw.strip().split('\n')[0].strip()
-    # Remove markdown code fences if the LLM wrapped the output
-    if line.startswith("```"):
-        line = line.lstrip("`").strip()
+    # Remove markdown code fences
+    line = line.strip("`").strip()
+    return line
 
-    # Dynamically replace any call to the target function (or 'abs') with 'result'
-    # e.g. "absolute(x)" -> "result", "abs(x)" -> "result"
+
+def _negate_operator(op: str) -> str:
+    """Deterministically negate a logical operator."""
+    negation_table = {
+        "<": ">=",
+        "<=": ">",
+        "==": "!=",
+        "!=": "==",
+        ">": "<=",
+        ">=": "<"
+    }
+    return negation_table.get(op, "==")  # Default to == if unknown, though shouldn't happen
+
+
+def translate_claim(function_source: str, claim: str, func_name: str = "", param_names: list[str] = None) -> str:
+    """
+    Translate a natural language claim into a C* violation check statement
+    using a robust 4-step pipeline.
+    """
+    backend = os.environ.get("DOCCHECK_BACKEND", "ollama").lower()
+
+    # Step 1: Extract Semantic Meaning
+    prop_prompt = _load_prompt("semantic_property.txt", function_source=function_source, claim=claim)
+    if backend == "ollama":
+        raw_prop = _ask_ollama(prop_prompt)
+    elif backend == "openrouter":
+        raw_prop = _ask_openrouter(prop_prompt)
+    elif backend == "claude":
+        raw_prop = _ask_claude(prop_prompt)
+    else:
+        raise KeyError(f"Unknown backend '{backend}'")
+    
+    property_str = _normalise_property(raw_prop)
+    
+    # Step 2: Formalize into structured logic
+    logic_prompt = _load_prompt("formalize_logic.txt", property=property_str)
+    if DOCCHECK_BACKEND == "ollama":
+        raw_logic = _ask_ollama(logic_prompt)
+    elif DOCCHECK_BACKEND == "openrouter":
+        raw_logic = _ask_openrouter(logic_prompt)
+    elif DOCCHECK_BACKEND == "claude":
+        raw_logic = _ask_claude(logic_prompt)
+    
+    try:
+        # LLMs sometimes wrap JSON in code blocks
+        json_match = re.search(r'\{.*\}', raw_logic, re.DOTALL)
+        if json_match:
+            logic_json = json.loads(json_match.group(0))
+        else:
+            logic_json = json.loads(raw_logic)
+    except (json.JSONDecodeError, AttributeError):
+        # Fallback if JSON parsing fails - try a simple regex-based extraction
+        # This adds robustness if the LLM fails to output valid JSON
+        match = re.search(r'^\s*(.+?)\s*([<>=!]+)\s*(.+?)\s*$', property_str)
+        if match:
+            logic_json = {"lhs": match.group(1), "op": match.group(2), "rhs": match.group(3)}
+        else:
+            raise ValueError(f"Could not formalize logic from: {raw_logic}")
+
+    # Step 3: Negate Mechanically
+    negated_op = _negate_operator(logic_json["op"])
+    
+    # Step 4: Generate Code Deterministically
+    lhs = logic_json["lhs"]
+    rhs = logic_json["rhs"]
+    
+    # Normalize result/params if needed (e.g. LLM pointer confusion)
     if func_name:
         synonyms = [re.escape(func_name), "abs"]
         pattern = re.compile(rf'({"|".join(synonyms)})\s*\([^)]*\)')
-        line = pattern.sub("result", line)
+        lhs = pattern.sub("result", lhs)
+        rhs = pattern.sub("result", rhs)
+        
+    for pname in (param_names or []):
+        lhs = re.sub(rf'\*\s*{re.escape(pname)}', pname, lhs)
+        lhs = re.sub(rf'\(\s*{re.escape(pname)}\s*\)', pname, lhs)
+        rhs = re.sub(rf'\*\s*{re.escape(pname)}', pname, rhs)
+        rhs = re.sub(rf'\(\s*{re.escape(pname)}\s*\)', pname, rhs)
 
-    # Clean up potential LLM pointer-confusion for any parameter
-    # e.g. "*x", "* x", "(*x)" -> "x"
-    for pname in param_names:
-        line = re.sub(rf'\*\s*{re.escape(pname)}', pname, line)
-        line = re.sub(rf'\(\s*{re.escape(pname)}\s*\)', pname, line)
-
-    # Standardize signaling to exit(1) as per new project requirement
-    line = line.replace("return 1", "exit(1)").replace("return(1)", "exit(1)")
-
-    return line
+    return f"if ({lhs} {negated_op} {rhs}) {{ exit(1); }}"
 
 
 # ---------------------------------------------------------------------------
@@ -100,24 +163,9 @@ def _ask_claude(prompt: str) -> str:
 DOCCHECK_BACKEND = os.environ.get("DOCCHECK_BACKEND", "ollama").lower()
 
 
-def translate_claim(function_source: str, claim: str, func_name: str = "", param_names: list[str] = None) -> str:
-    """Translate a natural language claim into a C* violation check statement."""
-    prompt = _load_prompt("claim_to_assert.txt", function_source=function_source, claim=claim)
-    
-    if DOCCHECK_BACKEND == "ollama":
-        raw = _ask_ollama(prompt)
-    elif DOCCHECK_BACKEND == "openrouter":
-        raw = _ask_openrouter(prompt)
-    elif DOCCHECK_BACKEND == "claude":
-        raw = _ask_claude(prompt)
-    else:
-        raise KeyError(f"Unknown backend '{DOCCHECK_BACKEND}'")
-        
-    return _normalise_response(raw, func_name, param_names or [])
-
-
 def explain_result(source: str, claim: str, verdict: str, model: dict = None, formula: str = None) -> str:
     """Generate a Markdown explanation of the verification result."""
+    backend = os.environ.get("DOCCHECK_BACKEND", "ollama").lower()
     prompt = _load_prompt(
         "explain_result.txt", 
         source=source, 
@@ -127,11 +175,11 @@ def explain_result(source: str, claim: str, verdict: str, model: dict = None, fo
         formula=formula or "N/A"
     )
 
-    if DOCCHECK_BACKEND == "ollama":
+    if backend == "ollama":
         return _ask_ollama(prompt)
-    elif DOCCHECK_BACKEND == "openrouter":
+    elif backend == "openrouter":
         return _ask_openrouter(prompt)
-    elif DOCCHECK_BACKEND == "claude":
+    elif backend == "claude":
         return _ask_claude(prompt)
     
     return "LLM Explanation unavailable."

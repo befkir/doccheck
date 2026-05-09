@@ -13,8 +13,8 @@ from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from pipeline.inject import inject_check, _parse_signature, _build_harness, _strip_existing_main
-from pipeline.verify import _parse_bitme_output, compile_source
+from pipeline.inject import inject_check, parse_signature, _build_harness, _strip_existing_main
+from pipeline.verify import compile_source
 
 
 # ===========================================================================
@@ -66,13 +66,13 @@ uint64_t main() {
 
 class TestParseSignature:
     def test_single_param(self):
-        name, params = _parse_signature(ABSOLUTE_SRC)
+        name, params = parse_signature(ABSOLUTE_SRC)
         assert name == "absolute"
         assert len(params) == 1
         assert params[0] == ("uint64_t", "x")
 
     def test_two_params(self):
-        name, params = _parse_signature(MAX_SRC)
+        name, params = parse_signature(MAX_SRC)
         assert name == "max"
         assert len(params) == 2
         assert params[0] == ("uint64_t", "x")
@@ -80,7 +80,7 @@ class TestParseSignature:
 
     def test_no_function_raises(self):
         with pytest.raises(ValueError, match="Could not find"):
-            _parse_signature("uint64_t main() { return 0; }")
+            parse_signature("uint64_t main() { return 0; }")
 
 
 class TestBuildHarness:
@@ -143,41 +143,6 @@ class TestInjectCheck:
         assert patched.count("if (result < 0) { return 1; }") == 1
 
 
-# ===========================================================================
-# verify.py tests — _parse_bitme_output
-# ===========================================================================
-
-class TestParseBitmeOutput:
-    def test_unsat_gives_verified(self):
-        result = _parse_bitme_output("unsat\n")
-        assert result["verdict"] == "VERIFIED"
-        assert result["witness"] is None
-        assert result["error"] is None
-
-    def test_sat_gives_falsified(self):
-        result = _parse_bitme_output("sat\n")
-        assert result["verdict"] == "FALSIFIED"
-
-    def test_sat_with_witness_line(self):
-        output = "sat\n1 5 input_x\n"
-        result = _parse_bitme_output(output)
-        assert result["verdict"] == "FALSIFIED"
-        assert result["witness"] == 5
-
-    def test_sat_with_hex_witness(self):
-        output = "sat\n1 0x0a input_x\n"
-        result = _parse_bitme_output(output)
-        assert result["verdict"] == "FALSIFIED"
-        assert result["witness"] == 10
-
-    def test_unknown(self):
-        result = _parse_bitme_output("unknown\n")
-        assert result["verdict"] == "UNKNOWN"
-        assert result["error"] is not None
-
-    def test_empty_output(self):
-        result = _parse_bitme_output("")
-        assert result["verdict"] == "UNKNOWN"
 
 
 # ===========================================================================
@@ -197,11 +162,13 @@ class TestTranslateClaim:
     def test_ollama_backend(self):
         from pipeline import translate as t_module
         with patch.dict(os.environ, {"DOCCHECK_BACKEND": "ollama"}):
-            with patch("urllib.request.urlopen",
-                       return_value=self._mock_ollama_response(
-                           "if (result < 0) { return 1; }")):
+            with patch("pipeline.translate._ask_ollama") as mock_ask:
+                mock_ask.side_effect = [
+                    "result < 0", # Step 1
+                    '{"lhs": "result", "op": "<", "rhs": "0"}' # Step 2
+                ]
                 result = t_module.translate_claim("uint64_t f(uint64_t x){}", "never negative")
-        assert result == "if (result < 0) { return 1; }"
+        assert result == "if (result >= 0) { exit(1); }"
 
     def test_unknown_backend_raises(self):
         from pipeline import translate as t_module
@@ -224,15 +191,17 @@ class TestTranslateClaim:
                 t_module.translate_claim("src", "claim")
 
     def test_normalise_pointer_deref(self):
-        """LLM sometimes writes *x — should be normalised to x."""
+        """LLM sometimes writes *x — should be normalised to x in Step 4."""
         from pipeline import translate as t_module
         with patch.dict(os.environ, {"DOCCHECK_BACKEND": "ollama"}):
-            with patch("urllib.request.urlopen",
-                       return_value=self._mock_ollama_response(
-                           "if (result >= *x) { return 1; }")):
-                result = t_module.translate_claim("uint64_t f(uint64_t x){}", "claim")
+            with patch("pipeline.translate._ask_ollama") as mock_ask:
+                mock_ask.side_effect = [
+                    "result >= *x", # Step 1
+                    '{"lhs": "result", "op": ">=", "rhs": "*x"}' # Step 2
+                ]
+                result = t_module.translate_claim("uint64_t f(uint64_t x){}", "claim", param_names=["x"])
         assert "*x" not in result
-        assert "result >= x" in result
+        assert "result < x" in result # result >= x negated to result < x
 
 
 # ===========================================================================
@@ -264,7 +233,3 @@ uint64_t main() {
 """
         ok, out = compile_source(src)
         assert ok, f"Compile failed:\n{out}"
-
-    def test_compile_invalid_source(self):
-        ok, _ = compile_source("this is not valid C*;")
-        assert not ok

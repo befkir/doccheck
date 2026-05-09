@@ -1,0 +1,19 @@
+Convert the following semantic relation into a structured JSON object.
+
+The JSON object MUST have exactly three keys:
+- "lhs": the left-hand side operand.
+- "op": the logical operator (one of: <, <=, ==, !=, >, >=).
+- "rhs": the right-hand side operand.
+
+Examples:
+Input: result < x
+Output: {{"lhs": "result", "op": "<", "rhs": "x"}}
+
+Input: result >= 0
+Output: {{"lhs": "result", "op": ">=", "rhs": "0"}}
+
+Input: result != y
+Output: {{"lhs": "result", "op": "!=", "rhs": "y"}}
+
+Relation: {property}
+Output:

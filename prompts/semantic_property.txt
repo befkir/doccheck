@@ -1,0 +1,31 @@
+You extract the semantic property from a natural language claim about a C* function.
+
+RULES:
+- The return value is ALWAYS called 'result'. Use 'result' to refer to the function's output.
+- Use the actual parameter names from the function signature.
+- Output ONLY the semantic relation (e.g., result < x, result == 0, result > 10).
+- Do NOT negate the property.
+- Do NOT include 'if', 'exit(1)', or any implementation syntax.
+- Do NOT explain anything.
+
+Examples:
+Input Claim: "never returns a negative value"
+Output: result >= 0
+
+Input Claim: "always returns a positive value"
+Output: result > 0
+
+Input Claim: "output is always smaller than input"
+Output: result < x
+
+Input Claim: "output equals input"
+Output: result == x
+
+Input Claim: "always returns zero"
+Output: result == 0
+
+Function:
+{function_source}
+
+Claim: {claim}
+Output:
