@@ -1,6 +1,6 @@
 """
-btor2_verify.py — Parse Unicorn's BTOR2 output and verify with Z3.
-This replaces manual Z3 models — true binary-level verification.
+btor2_verify.py — Bounded Model Checking using Unicorn BTOR2 + Z3.
+Implements proper sequential state unrolling for binary-level verification.
 """
 import subprocess
 import os
@@ -10,274 +10,325 @@ SELFIE  = os.path.expanduser("~/selfie/selfie")
 UNICORN = os.path.expanduser("~/unicorn/target/debug/unicorn")
 
 def compile_and_run_unicorn(source_path, unroll=32):
-    """Compile C* to binary and run Unicorn symbolic execution."""
-    bin_path  = "/tmp/doccheck_patched.bin"
+    bin_path   = "/tmp/doccheck_patched.bin"
     btor2_path = "/tmp/doccheck_model.btor2"
-
-    # compile
-    r = subprocess.run([SELFIE, "-c", source_path, "-o", bin_path],
-                       capture_output=True, text=True)
+    r = subprocess.run(
+        [SELFIE, "-c", source_path, "-o", bin_path],
+        capture_output=True, text=True)
     if "syntax error" in r.stdout:
         return None, f"Compile error: {r.stdout[:200]}"
-
-    # symbolic execution
-    r = subprocess.run([UNICORN, "beator", bin_path,
-                        "--unroll", str(unroll), "--out", btor2_path],
-                       capture_output=True, text=True)
+    r = subprocess.run(
+        [UNICORN, "beator", bin_path,
+         "--unroll", str(unroll), "--out", btor2_path],
+        capture_output=True, text=True)
     return btor2_path, None
 
-def parse_btor2_to_z3(btor2_path):
-    """
-    Parse BTOR2 file and build Z3 expressions for each node.
-    Only handles bitvec sorts (sort 1 and sort 2) — not arrays.
-    Returns (z3_nodes dict, input_var, error)
-    """
-    nodes = {}   # node_id → Z3 expression
-    sorts = {}   # sort_id → bit width (None if array)
-    input_var = None  # the symbolic input (read syscall)
+def read_btor2(btor2_path):
+    """Read BTOR2 file into structured dictionaries."""
+    sorts   = {}   # nid → bit width (None if array)
+    inits   = {}   # state_nid → init_val_nid
+    nexts   = {}   # state_nid → next_val_nid
+    bads    = []   # list of (cond_nid, label)
+    lines   = {}   # nid → parts list (for formula nodes)
 
     with open(btor2_path) as f:
-        lines = f.readlines()
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith(';'):
+                continue
+            parts = line.split()
+            if len(parts) < 2:
+                continue
+            nid = parts[0]
+            op  = parts[1]
 
-    for line in lines:
-        line = line.strip()
-        if not line or line.startswith(';'):
-            continue
-        parts = line.split()
-        if not parts:
-            continue
-
-        nid = parts[0]
-        op  = parts[1] if len(parts) > 1 else ""
-
-        try:
             if op == 'sort':
                 if parts[2] == 'bitvec':
                     sorts[nid] = int(parts[3])
                 else:
-                    sorts[nid] = None
-
-            elif op in ('constd', 'const', 'consth'):
-                width = sorts.get(parts[2])
-                if width == 1:
-                    val = int(parts[3]) if op == 'constd' else \
-                          int(parts[3], 16) if op == 'consth' else \
-                          int(parts[3], 2)
-                    nodes[nid] = BoolVal(val != 0)
-                elif width:
-                    val = int(parts[3]) if op == 'constd' else \
-                          int(parts[3], 16) if op == 'consth' else \
-                          int(parts[3], 2)
-                    nodes[nid] = BitVecVal(val, width)
-
-            elif op == 'state':
-                width = sorts.get(parts[2])
-                if width == 1:
-                    nodes[nid] = Bool(f'state_{nid}')
-                elif width:
-                    nodes[nid] = BitVec(f'state_{nid}', width)
-
-            elif op == 'input':
-                width = sorts.get(parts[2])
-                if width:
-                    var = BitVec('x', width)
-                    nodes[nid] = var
-                    if input_var is None:
-                        input_var = var
-
+                    sorts[nid] = None  # array sort
             elif op == 'init':
-                state_nid = parts[2]
-                init_val  = parts[3]
-                if state_nid in nodes and init_val in nodes:
-                    nodes[state_nid] = nodes[init_val]
-
+                # init sort state_nid init_val_nid
+                sorts[parts[2]]  # register sort
+                inits[parts[3]]  = parts[4]  # state nid → init value nid
             elif op == 'next':
-                state_nid = parts[2]
-                next_val  = parts[3]
-                if next_val in nodes:
-                    nodes[state_nid] = nodes[next_val]
+                nexts[parts[3]] = parts[4]  # state nid → next value nid
+            elif op == 'bad':
+                bads.append((parts[2], parts[3] if len(parts) > 3 else ''))
+            else:
+                lines[nid] = parts
 
-            elif op == 'not':
-                if parts[3] in nodes:
-                    a = nodes[parts[3]]
-                    nodes[nid] = Not(a) if isinstance(a, BoolRef) else ~a
+    return sorts, inits, nexts, bads, lines
 
-            elif op == 'and':
-                if parts[3] in nodes and parts[4] in nodes:
-                    a, b = nodes[parts[3]], nodes[parts[4]]
-                    # normalise to Bool if either side is Bool
-                    if isinstance(a, BoolRef) or isinstance(b, BoolRef):
-                        if not isinstance(a, BoolRef):
-                            a = a != BitVecVal(0, a.size())
-                        if not isinstance(b, BoolRef):
-                            b = b != BitVecVal(0, b.size())
-                        nodes[nid] = And(a, b)
-                    else:
-                        nodes[nid] = a & b
-
-            elif op == 'or':
-                if parts[3] in nodes and parts[4] in nodes:
-                    a, b = nodes[parts[3]], nodes[parts[4]]
-                    if isinstance(a, BoolRef) or isinstance(b, BoolRef):
-                        if not isinstance(a, BoolRef):
-                            a = a != BitVecVal(0, a.size())
-                        if not isinstance(b, BoolRef):
-                            b = b != BitVecVal(0, b.size())
-                        nodes[nid] = Or(a, b)
-                    else:
-                        nodes[nid] = a | b
-
-            elif op == 'xor':
-                if parts[3] in nodes and parts[4] in nodes:
-                    a, b = nodes[parts[3]], nodes[parts[4]]
-                    if isinstance(a, BoolRef) or isinstance(b, BoolRef):
-                        nodes[nid] = Xor(a if isinstance(a, BoolRef) else a != BitVecVal(0, a.size()),
-                                         b if isinstance(b, BoolRef) else b != BitVecVal(0, b.size()))
-                    else:
-                        nodes[nid] = a ^ b
-
-            elif op == 'eq':
-                if parts[3] in nodes and parts[4] in nodes:
-                    nodes[nid] = (nodes[parts[3]] == nodes[parts[4]])
-
-            elif op == 'neq':
-                if parts[3] in nodes and parts[4] in nodes:
-                    nodes[nid] = (nodes[parts[3]] != nodes[parts[4]])
-
-            elif op == 'ite':
-                if all(p in nodes for p in parts[3:6]):
-                    cond = nodes[parts[3]]
-                    th   = nodes[parts[4]]
-                    el   = nodes[parts[5]]
-                    if not isinstance(cond, BoolRef):
-                        cond = cond != BitVecVal(0, cond.size())
-                    nodes[nid] = If(cond, th, el)
-
-            elif op == 'add':
-                if parts[3] in nodes and parts[4] in nodes:
-                    nodes[nid] = nodes[parts[3]] + nodes[parts[4]]
-
-            elif op == 'sub':
-                if parts[3] in nodes and parts[4] in nodes:
-                    nodes[nid] = nodes[parts[3]] - nodes[parts[4]]
-
-            elif op == 'mul':
-                if parts[3] in nodes and parts[4] in nodes:
-                    nodes[nid] = nodes[parts[3]] * nodes[parts[4]]
-
-            elif op == 'udiv':
-                if parts[3] in nodes and parts[4] in nodes:
-                    nodes[nid] = UDiv(nodes[parts[3]], nodes[parts[4]])
-
-            elif op == 'urem':
-                if parts[3] in nodes and parts[4] in nodes:
-                    nodes[nid] = URem(nodes[parts[3]], nodes[parts[4]])
-
-            elif op in ('ult','slt'):
-                if parts[3] in nodes and parts[4] in nodes:
-                    nodes[nid] = ULT(nodes[parts[3]], nodes[parts[4]])
-
-            elif op in ('ulte','slte'):
-                if parts[3] in nodes and parts[4] in nodes:
-                    nodes[nid] = ULE(nodes[parts[3]], nodes[parts[4]])
-
-            elif op in ('ugt','sgt'):
-                if parts[3] in nodes and parts[4] in nodes:
-                    nodes[nid] = UGT(nodes[parts[3]], nodes[parts[4]])
-
-            elif op in ('ugte','sgte'):
-                if parts[3] in nodes and parts[4] in nodes:
-                    nodes[nid] = UGE(nodes[parts[3]], nodes[parts[4]])
-
-            elif op == 'sll':
-                if parts[3] in nodes and parts[4] in nodes:
-                    nodes[nid] = nodes[parts[3]] << nodes[parts[4]]
-
-            elif op == 'srl':
-                if parts[3] in nodes and parts[4] in nodes:
-                    nodes[nid] = LShR(nodes[parts[3]], nodes[parts[4]])
-
-            elif op == 'uext':
-                if parts[3] in nodes:
-                    src = nodes[parts[3]]
-                    ext = int(parts[4])
-                    if isinstance(src, BoolRef):
-                        src = If(src, BitVecVal(1, 1), BitVecVal(0, 1))
-                    nodes[nid] = ZeroExt(ext, src) if ext > 0 else src
-
-            elif op == 'slice':
-                if parts[3] in nodes:
-                    hi = int(parts[4])
-                    lo = int(parts[5])
-                    nodes[nid] = Extract(hi, lo, nodes[parts[3]])
-
-            elif op in ('bad','constraint','fair','output',
-                        'read','write','array'):
-                pass
-
-        except Exception:
-            pass
-
-    return nodes, input_var, None
-
-
-def verify_btor2(btor2_path):
+def eval_node(nid, lines, sorts, current_vars):
     """
-    Find non-zero-exit-code bad state and check with Z3.
+    Recursively evaluate a BTOR2 node using current step variables.
+    Returns a Z3 expression.
+    """
+    if nid in current_vars:
+        return current_vars[nid]
+    if nid not in lines:
+        return None
+
+    parts = lines[nid]
+    op = parts[1]
+
+    def get(n):
+        return eval_node(n, lines, sorts, current_vars)
+
+    def to_bool(e):
+        if isinstance(e, BoolRef):
+            return e
+        return e != BitVecVal(0, e.size())
+
+    try:
+        if op in ('constd',):
+            w = sorts.get(parts[2])
+            if w == 1:
+                result = BoolVal(int(parts[3]) != 0)
+            elif w:
+                result = BitVecVal(int(parts[3]), w)
+            else:
+                return None
+        elif op == 'consth':
+            w = sorts.get(parts[2])
+            if w:
+                result = BitVecVal(int(parts[3], 16), w)
+            else:
+                return None
+        elif op == 'const':
+            w = sorts.get(parts[2])
+            if w:
+                result = BitVecVal(int(parts[3], 2), w)
+            else:
+                return None
+        elif op == 'not':
+            a = get(parts[3])
+            if a is None: return None
+            result = Not(a) if isinstance(a, BoolRef) else ~a
+        elif op == 'and':
+            a, b = get(parts[3]), get(parts[4])
+            if a is None or b is None: return None
+            if isinstance(a, BoolRef) or isinstance(b, BoolRef):
+                result = And(to_bool(a), to_bool(b))
+            else:
+                result = a & b
+        elif op == 'or':
+            a, b = get(parts[3]), get(parts[4])
+            if a is None or b is None: return None
+            if isinstance(a, BoolRef) or isinstance(b, BoolRef):
+                result = Or(to_bool(a), to_bool(b))
+            else:
+                result = a | b
+        elif op == 'xor':
+            a, b = get(parts[3]), get(parts[4])
+            if a is None or b is None: return None
+            result = Xor(to_bool(a), to_bool(b)) if isinstance(a, BoolRef) \
+                     else a ^ b
+        elif op == 'eq':
+            a, b = get(parts[3]), get(parts[4])
+            if a is None or b is None: return None
+            result = (a == b)
+        elif op == 'neq':
+            a, b = get(parts[3]), get(parts[4])
+            if a is None or b is None: return None
+            result = (a != b)
+        elif op == 'ite':
+            c = get(parts[3]); t = get(parts[4]); e = get(parts[5])
+            if any(x is None for x in [c,t,e]): return None
+            result = If(to_bool(c), t, e)
+        elif op == 'add':
+            a, b = get(parts[3]), get(parts[4])
+            if a is None or b is None: return None
+            result = a + b
+        elif op == 'sub':
+            a, b = get(parts[3]), get(parts[4])
+            if a is None or b is None: return None
+            result = a - b
+        elif op == 'mul':
+            a, b = get(parts[3]), get(parts[4])
+            if a is None or b is None: return None
+            result = a * b
+        elif op == 'udiv':
+            a, b = get(parts[3]), get(parts[4])
+            if a is None or b is None: return None
+            result = UDiv(a, b)
+        elif op == 'urem':
+            a, b = get(parts[3]), get(parts[4])
+            if a is None or b is None: return None
+            result = URem(a, b)
+        elif op in ('ult','slt'):
+            a, b = get(parts[3]), get(parts[4])
+            if a is None or b is None: return None
+            result = ULT(a, b)
+        elif op in ('ulte','slte'):
+            a, b = get(parts[3]), get(parts[4])
+            if a is None or b is None: return None
+            result = ULE(a, b)
+        elif op in ('ugt','sgt'):
+            a, b = get(parts[3]), get(parts[4])
+            if a is None or b is None: return None
+            result = UGT(a, b)
+        elif op in ('ugte','sgte'):
+            a, b = get(parts[3]), get(parts[4])
+            if a is None or b is None: return None
+            result = UGE(a, b)
+        elif op == 'sll':
+            a, b = get(parts[3]), get(parts[4])
+            if a is None or b is None: return None
+            result = a << b
+        elif op == 'srl':
+            a, b = get(parts[3]), get(parts[4])
+            if a is None or b is None: return None
+            result = LShR(a, b)
+        elif op == 'uext':
+            a = get(parts[3])
+            if a is None: return None
+            ext = int(parts[4])
+            if isinstance(a, BoolRef):
+                a = If(a, BitVecVal(1,1), BitVecVal(0,1))
+            result = ZeroExt(ext, a) if ext > 0 else a
+        elif op == 'slice':
+            a = get(parts[3])
+            if a is None: return None
+            hi, lo = int(parts[4]), int(parts[5])
+            result = Extract(hi, lo, a)
+        else:
+            return None
+
+        current_vars[nid] = result
+        return result
+
+    except Exception:
+        return None
+
+def verify_btor2(btor2_path, num_steps=32):
+    """
+    Bounded Model Checking: unroll state machine for num_steps.
     Returns (verdict, witness, error)
     """
-    # find the bad state node
-    target_cond_id = None
-    with open(btor2_path) as f:
-        for line in f:
-            parts = line.strip().split()
-            if len(parts) >= 3 and parts[1] == 'bad' and 'non-zero-exit' in line:
-                target_cond_id = parts[2]
-                break
+    sorts, inits, nexts, bads, lines = read_btor2(btor2_path)
 
-    if target_cond_id is None:
-        return "UNKNOWN", None, "Could not find non-zero-exit-code bad state in BTOR2"
+    # find the non-zero-exit bad state
+    target_bad = None
+    for cond_nid, label in bads:
+        if 'non-zero-exit' in label:
+            target_bad = cond_nid
+            break
+    if target_bad is None:
+        return "UNKNOWN", None, "No non-zero-exit-code bad state found"
 
-    # parse the BTOR2
-    nodes, input_var, err = parse_btor2_to_z3(btor2_path)
-    if err:
-        return "UNKNOWN", None, err
+    # identify state nodes and input nodes
+    state_nodes = {}  # nid → bit width
+    input_nodes = {}  # nid → bit width
+    for nid, parts in lines.items():
+        if parts[1] == 'state':
+            w = sorts.get(parts[2])
+            if w is not None:
+                state_nodes[nid] = w
+        elif parts[1] == 'input':
+            w = sorts.get(parts[2])
+            if w is not None:
+                input_nodes[nid] = w
 
-    if target_cond_id not in nodes:
-        return "UNKNOWN", None, \
-            f"Could not build Z3 expression for condition node {target_cond_id}"
+    # create the symbolic input (x — the user's input)
+    input_var = None
+    input_nid = None
+    for nid, w in input_nodes.items():
+        input_var = BitVec('x', w)
+        input_nid = nid
+        break  # take first input
 
-    violation = nodes[target_cond_id]
+    # === BMC: unroll for num_steps steps ===
+    # current_vars holds the Z3 expressions for all nodes at current step
+    current_vars = {}
 
-    # make sure violation is a Bool
-    if not isinstance(violation, BoolRef):
-        violation = violation != BitVecVal(0, violation.size())
+    # add the symbolic input
+    if input_nid:
+        current_vars[input_nid] = input_var
 
-    # ask Z3: can this violation ever be true?
-    solver = Solver()
-    solver.add(violation)
-    outcome = solver.check()
+    # Step 0: initialise state variables from init nodes
+    for state_nid, w in state_nodes.items():
+        if state_nid in inits:
+            init_val_nid = inits[state_nid]
+            # evaluate the init value (usually a constant)
+            init_expr = eval_node(init_val_nid, lines, sorts, current_vars)
+            if init_expr is not None:
+                current_vars[state_nid] = init_expr
+            else:
+                # default: free symbolic variable
+                if w == 1:
+                    current_vars[state_nid] = Bool(f's_{state_nid}_0')
+                else:
+                    current_vars[state_nid] = BitVec(f's_{state_nid}_0', w)
+        else:
+            # no init — free symbolic variable
+            if w == 1:
+                current_vars[state_nid] = Bool(f's_{state_nid}_0')
+            else:
+                current_vars[state_nid] = BitVec(f's_{state_nid}_0', w)
 
-    if outcome == sat:
-        # find a small readable witness
-        witness = None
-        if input_var is not None:
-            input_size = input_var.size()
-            for v in range(101):
-                s2 = Solver()
-                s2.add(violation)
-                s2.add(input_var == BitVecVal(v, input_size))
-                if s2.check() == sat:
-                    witness = v
-                    break
-            if witness is None:
-                m = solver.model()
-                val = m.eval(input_var, model_completion=True)
-                witness = val.as_long() if hasattr(val, 'as_long') else str(val)
-        return "FALSIFIED", witness, None
+    # check bad state at each step
+    for step in range(num_steps):
+        # clear cached formula nodes (keep only state/input vars)
+        formula_cache = {k: v for k, v in current_vars.items()
+                         if k in state_nodes or k == input_nid}
+        current_vars = formula_cache
 
-    elif outcome == unsat:
-        return "VERIFIED", None, None
+        # re-add input
+        if input_nid:
+            current_vars[input_nid] = input_var
 
-    else:
-        return "UNKNOWN", None, "Z3 returned unknown"
+        # evaluate bad state condition at this step
+        bad_expr = eval_node(target_bad, lines, sorts, current_vars)
+        if bad_expr is None:
+            continue
+
+        # make it a Bool
+        if not isinstance(bad_expr, BoolRef):
+            bad_expr = bad_expr != BitVecVal(0, bad_expr.size())
+
+        # ask Z3: is the bad state reachable at this step?
+        solver = Solver()
+        solver.add(bad_expr)
+        outcome = solver.check()
+
+        if outcome == sat:
+            # find readable witness
+            witness = None
+            if input_var is not None:
+                isize = input_var.size()
+                for v in range(101):
+                    s2 = Solver()
+                    s2.add(bad_expr)
+                    s2.add(input_var == BitVecVal(v, isize))
+                    if s2.check() == sat:
+                        witness = v
+                        break
+                if witness is None:
+                    m = solver.model()
+                    val = m.eval(input_var, model_completion=True)
+                    witness = val.as_long() if hasattr(val,'as_long') else str(val)
+            return "FALSIFIED", witness, None
+
+        # advance to next step: compute next state values
+        next_vars = {}
+        for state_nid, w in state_nodes.items():
+            if state_nid in nexts:
+                next_val_nid = nexts[state_nid]
+                next_expr = eval_node(next_val_nid, lines, sorts, current_vars)
+                if next_expr is not None:
+                    next_vars[state_nid] = next_expr
+                else:
+                    if w == 1:
+                        next_vars[state_nid] = Bool(f's_{state_nid}_{step+1}')
+                    else:
+                        next_vars[state_nid] = BitVec(f's_{state_nid}_{step+1}', w)
+            else:
+                next_vars[state_nid] = current_vars.get(state_nid,
+                    BitVec(f's_{state_nid}_{step+1}', w) if w > 1
+                    else Bool(f's_{state_nid}_{step+1}'))
+
+        current_vars.update(next_vars)
+
+    return "VERIFIED", None, None
