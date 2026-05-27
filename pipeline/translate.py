@@ -143,27 +143,27 @@ CLAUDE_KEY       = os.environ.get("ANTHROPIC_API_KEY", "")
 def _ask_ollama(prompt: str) -> str:
     payload = json.dumps({"model": OLLAMA_MODEL, "prompt": prompt, "stream": False}).encode()
     req = urllib.request.Request(OLLAMA_URL, data=payload, headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=60) as resp:
+    with urllib.request.urlopen(req, timeout=180) as resp:
         return json.loads(resp.read())["response"]
 
 def _ask_openrouter(prompt: str) -> str:
     if not OPENROUTER_KEY: raise EnvironmentError("OPENROUTER_API_KEY is not set.")
     payload = json.dumps({"model": OPENROUTER_MODEL, "messages": [{"role": "user", "content": prompt}], "temperature": 0}).encode()
     req = urllib.request.Request(OPENROUTER_URL, data=payload, headers={"Content-Type": "application/json", "Authorization": f"Bearer {OPENROUTER_KEY}"})
-    with urllib.request.urlopen(req, timeout=60) as resp:
+    with urllib.request.urlopen(req, timeout=180) as resp:
         return json.loads(resp.read())["choices"][0]["message"]["content"]
 
 def _ask_claude(prompt: str) -> str:
     if not CLAUDE_KEY: raise EnvironmentError("ANTHROPIC_API_KEY is not set.")
     payload = json.dumps({"model": CLAUDE_MODEL, "max_tokens": 1024, "messages": [{"role": "user", "content": prompt}]}).encode()
     req = urllib.request.Request(CLAUDE_URL, data=payload, headers={"Content-Type": "application/json", "x-api-key": CLAUDE_KEY, "anthropic-version": "2023-06-01"})
-    with urllib.request.urlopen(req, timeout=60) as resp:
+    with urllib.request.urlopen(req, timeout=180) as resp:
         return json.loads(resp.read())["content"][0]["text"]
 
 DOCCHECK_BACKEND = os.environ.get("DOCCHECK_BACKEND", "ollama").lower()
 
 
-def explain_result(source: str, claim: str, verdict: str, model: dict = None, formula: str = None) -> str:
+def explain_result(source: str, claim: str, verdict: str, model: dict = None, formula: str = None, verifier_condition: str = None) -> str:
     """Generate a Markdown explanation of the verification result."""
     backend = os.environ.get("DOCCHECK_BACKEND", "ollama").lower()
     prompt = _load_prompt(
@@ -171,6 +171,7 @@ def explain_result(source: str, claim: str, verdict: str, model: dict = None, fo
         source=source, 
         claim=claim, 
         verdict=verdict, 
+        verifier_condition=verifier_condition or "N/A",
         model=json.dumps(model, indent=2) if model else "N/A", 
         formula=formula or "N/A"
     )

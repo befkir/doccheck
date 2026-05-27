@@ -8,6 +8,7 @@ Function Source:
 
 Claim: {claim}
 Verdict: {verdict}
+Verifier Condition: {verifier_condition}
 Mathematical Formula (SMT): {formula}
 Counter-example Model: {model}
 

@@ -110,7 +110,8 @@ def check(function_source: str, claim: str, function_name: str, kmax: int = 100)
             claim=claim,
             verdict=verdict,
             model=result.get("model"),
-            formula=result.get("formula")
+            formula=result.get("formula"),
+            verifier_condition=check_stmt
         )
         print(explanation)
     except Exception as exc:
