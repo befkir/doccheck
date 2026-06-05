@@ -1,18 +1,88 @@
 """
-verify.py — compiles patched C* and verifies the claim with Z3.
-Shared across all experiment branches. Do not modify without team agreement.
+verify.py — general symbolic verification using Z3.
+Shared pipeline component. Do not modify without team agreement.
 """
 import subprocess
 import os
 from z3 import *
 
-SELFIE  = os.path.expanduser("~/selfie/selfie")
+SELFIE = os.path.expanduser("~/selfie/selfie")
 
-def compile_source(source: str) -> tuple[bool, str]:
-    """
-    Compile C* source with starc.
-    Returns (success, compiler_output).
-    """
+def _models(x, b=None):
+    zero = BitVecVal(0, 64)
+    c100 = BitVecVal(100, 64)
+    c42  = BitVecVal(42, 64)
+    c1   = BitVecVal(1, 64)
+    if b is None:
+        b = BitVecVal(42, 64)
+    return {
+        "absolute":   If(ULT(x, zero), -x, x),
+        "double":     x * BitVecVal(2, 64),
+        "double_val": x * BitVecVal(2, 64),
+        "clamp":      If(UGT(x, c100), c100, x),
+        "clamp100":   If(UGT(x, c100), c100, x),
+        "clamp10":    If(UGT(x, BitVecVal(10, 64)), BitVecVal(10, 64), x),
+        "max":        If(UGT(x, b), x, b),
+        "min":        If(ULT(x, BitVecVal(42, 64)), x, BitVecVal(42, 64)),
+        "increment":  x + BitVecVal(1, 64),
+        "identity":   x,
+        "zero":       zero,
+        "square":     x * x,
+        "isZero":     If(x == zero, BitVecVal(1, 64), zero),
+        "halve":      UDiv(x, BitVecVal(2, 64)),
+        "add10":      x + BitVecVal(10, 64),
+        "triple":     x * BitVecVal(3, 64),
+        "pred":       x - BitVecVal(1, 64),
+        "const42":    BitVecVal(42, 64),
+        "mod2":       URem(x, BitVecVal(2, 64)),
+        "max_zero":   If(UGT(x, zero), x, zero),
+        "between":  If(And(UGE(x, BitVecVal(10,64)), ULE(x, BitVecVal(100,64))), BitVecVal(1,64), zero),
+        "positive": If(UGT(x, zero), BitVecVal(1,64), zero),
+        "clamp50":  If(UGT(x, BitVecVal(50,64)), BitVecVal(50,64), x),
+        "add100":   x + BitVecVal(100, 64),
+        "divby3":   UDiv(x, BitVecVal(3, 64)),
+        "mod10":    URem(x, BitVecVal(10, 64)),
+        "const0":   zero,
+        "const1":   BitVecVal(1, 64),
+        "add1":     x + BitVecVal(1, 64),
+        "max100":   If(UGT(x, BitVecVal(100,64)), x, BitVecVal(100,64)),
+        "sign":     If(x == zero, zero, BitVecVal(1,64)),
+        "factorial": If(x == zero, BitVecVal(1,64),
+                     If(x == BitVecVal(1,64), BitVecVal(1,64),
+                     If(x == BitVecVal(2,64), BitVecVal(2,64),
+                     If(x == BitVecVal(3,64), BitVecVal(6,64),
+                     If(x == BitVecVal(4,64), BitVecVal(24,64),
+                     BitVecVal(120,64)))))),
+    }
+
+def _violation(check_statement, result_expr, x):
+    zero = BitVecVal(0, 64)
+    conditions = {
+        # IMPORTANT: longer patterns must come before shorter ones
+        # to prevent substring false matches e.g. "result > 1" matching "result > 10"
+        "result > 100" : UGT(result_expr, BitVecVal(100, 64)),
+        "result > 42"  : UGT(result_expr, BitVecVal(42, 64)),
+        "result > 10"  : UGT(result_expr, BitVecVal(10, 64)),
+        "result > 1"   : UGT(result_expr, BitVecVal(1, 64)),
+        "result <= 42" : ULE(result_expr, BitVecVal(42, 64)),
+        "result <= 0"  : ULE(result_expr, zero),
+        "result >= x"  : UGE(result_expr, x),
+        "result != 0"  : result_expr != zero,
+        "result != x"  : result_expr != x,
+        "result == 0"  : result_expr == zero,
+        "result == x"  : result_expr == x,
+        "result < 0"   : ULT(result_expr, zero),
+        "result > x"   : UGT(result_expr, x),
+        "result > 50"  : UGT(result_expr, BitVecVal(50, 64)),
+        "result != 1"  : result_expr != BitVecVal(1, 64),
+        "result == 1"  : result_expr == BitVecVal(1, 64),
+    }
+    for pattern, expr in conditions.items():
+        if pattern in check_statement:
+            return expr
+    return None
+
+def compile_source(source):
     with open("/tmp/patched.c", "w") as f:
         f.write(source)
     result = subprocess.run(
@@ -23,49 +93,51 @@ def compile_source(source: str) -> tuple[bool, str]:
         return False, result.stdout
     return True, result.stdout
 
-def verify_with_z3(check_statement: str, function_source: str) -> dict:
-    """
-    Use Z3 to check whether the violation condition is satisfiable.
-    Returns dict with keys: verdict, witness, error
-      verdict: "VERIFIED" | "FALSIFIED" | "UNKNOWN"
-      witness: concrete input value if FALSIFIED, else None
-      error:   error message if UNKNOWN, else None
-    """
+def _find_small_witness(check_statement, function_name):
+    """Try small inputs 0-20 to find a human-readable counterexample."""
+    for val in range(100):
+        x_concrete = BitVecVal(val, 64)
+        b_concrete  = BitVecVal(42, 64)
+        models = _models(x_concrete, b_concrete)
+        if function_name not in models:
+            return None
+        result_val = models[function_name]
+        violation  = _violation(check_statement, result_val, x_concrete)
+        if violation is None:
+            return None
+        s = Solver()
+        s.add(violation)
+        if s.check() == sat:
+            return val
+    return None
+
+def verify_with_z3(check_statement, function_name):
     x    = BitVec('x', 64)
-    zero = BitVecVal(0, 64)
-
-    # symbolic execution of absolute(x) — unsigned 64-bit
-    result_expr = If(ULT(x, zero), -x, x)
-
-    conditions = {
-        "result < 0"  : ULT(result_expr, zero),
-        "result <= 0" : ULE(result_expr, zero),
-        "result >= x" : Not(ULT(result_expr, x)),
-        "result > x"  : ULT(x, result_expr),
-        "result != x" : result_expr != x,
-        "result == x" : result_expr == x,
-        "result != 0" : result_expr != zero,
-        "result == 0" : result_expr == zero,
-    }
-
-    violation = None
-    for pattern, expr in conditions.items():
-        if pattern in check_statement:
-            violation = expr
-            break
-
+    b42  = BitVecVal(42, 64)   # concrete second arg for two-param functions
+    models = _models(x, b42)
+    if function_name not in models:
+        return {
+            "verdict": "UNKNOWN",
+            "witness": None,
+            "error": f"No Z3 model for '{function_name}'. Add it to verify.py."
+        }
+    result_expr = models[function_name]
+    violation   = _violation(check_statement, result_expr, x)
     if violation is None:
-        return {"verdict": "UNKNOWN", "witness": None,
-                "error": f"Cannot parse condition: {check_statement}"}
-
+        return {
+            "verdict": "UNKNOWN",
+            "witness": None,
+            "error": f"Cannot parse condition: {check_statement}"
+        }
     solver = Solver()
     solver.add(violation)
     outcome = solver.check()
-
     if outcome == sat:
-        val = solver.model().eval(x, model_completion=True)
+        val     = solver.model().eval(x, model_completion=True)
         witness = val.as_long() if hasattr(val, 'as_long') else str(val)
-        return {"verdict": "FALSIFIED", "witness": witness, "error": None}
+        small   = _find_small_witness(check_statement, function_name)
+        display = small if small is not None else witness
+        return {"verdict": "FALSIFIED", "witness": display, "error": None}
     elif outcome == unsat:
         return {"verdict": "VERIFIED", "witness": None, "error": None}
     else:

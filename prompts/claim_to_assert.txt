@@ -4,6 +4,8 @@ RULES:
 - The return value is ALWAYS called 'result'
 - The function parameter is ALWAYS called 'x'
 - Output ONLY the if-statement on one line, nothing else, no explanation
+- "never returns more than N" means result > N, NOT result != N
+- "never returns more than 1" means if (result > 1) NOT if (result != 1)
 
 Examples:
 claim: "never returns a negative value"
@@ -21,8 +23,22 @@ output: if (result != x) {{ return 1; }}
 claim: "always returns zero"
 output: if (result != 0) {{ return 1; }}
 
+claim: "never returns more than 1"
+output: if (result > 1) {{ return 1; }}
+
+claim: "never returns more than 42"
+output: if (result > 42) {{ return 1; }}
+
+claim: "result is never greater than 10"
+output: if (result > 10) {{ return 1; }}
+
+claim: "result is never greater than 100"
+output: if (result > 100) {{ return 1; }}
+
+claim: "never returns more than 50"
+output: if (result > 50) {{ return 1; }}
+
 Function:
 {function_source}
-
 Claim: {claim}
 output:
