@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from pipeline.translate import translate_claim
 from pipeline.inject    import inject_check
 from pipeline.verify    import compile_source, verify_with_z3
+from pipeline.binary_verify import hybrid_verify
 
 FUNCTIONS_DIR = os.path.join(os.path.dirname(__file__), "functions")
 CLAIMS_FILE   = os.path.join(os.path.dirname(__file__), "claims.json")
@@ -88,14 +89,12 @@ def run_all():
                             "verification_correct": False})
             continue
 
-        result  = verify_with_z3(check_stmt, func_name)
-        verdict = result["verdict"]
+        verdict, witness, method = hybrid_verify(source, claim, check_stmt, func_name)
         verification_match = (verdict == expected)
         if verification_match:
             verification_correct += 1
 
         v_symbol = "PASS" if verification_match else "FAIL"
-        witness  = result.get("witness")
         w_str    = f" (x={witness})" if witness is not None else ""
 
         print(f"  {v_symbol} {func_name:12} | {claim[:45]:45} | {verdict}{w_str}")
