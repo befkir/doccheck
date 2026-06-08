@@ -24,7 +24,8 @@ def translate_claim(function_source: str, claim: str) -> str:
     data = json.dumps({
         "model": "llama3.2",
         "prompt": prompt,
-        "stream": False
+        "stream": False,
+        "options": {"temperature": 0}
     }).encode()
 
     req = urllib.request.Request(
