@@ -37,7 +37,7 @@ def check(function_source, claim, function_name, show_proof=False):
 
     if show_proof:
         print()
-        proof = explain_proof(function_source, claim, check_stmt, function_name)
+        proof = explain_proof(function_source, claim, check_stmt, function_name, verdict)
         print(proof)
 
     return {"verdict": verdict, "witness": witness, "method": method}
