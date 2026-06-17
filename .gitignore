@@ -23,3 +23,5 @@ benchmark/results/
 *.swo
 .z3-trace
 *~
+.z3-trace
+*~
