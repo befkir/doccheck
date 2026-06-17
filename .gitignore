@@ -21,3 +21,5 @@ benchmark/results/
 .vscode/
 *.swp
 *.swo
+.z3-trace
+*~
