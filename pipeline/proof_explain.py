@@ -206,3 +206,58 @@ def explain_proof(source: str, claim: str, check_stmt: str,
     out.append("=" * W)
 
     return "\n".join(out)
+
+
+
+def explain_proof_short(source: str, claim: str, check_stmt: str,
+                        func_name: str) -> str:
+    """Concise proof conclusion only."""
+    import re as re2, subprocess as sp2
+    check_exit = check_stmt.replace("return 1;", "exit(1);")
+    patched = source.replace("return result;",
+                             "  " + check_exit + "\n  return result;")
+    src_path = "/tmp/proof_" + func_name + ".c"
+    smt_path = "/tmp/proof_" + func_name + ".smt"
+    with open(src_path, "w") as f:
+        f.write(patched)
+    sp2.run([MONSTER, "-c", src_path, "-", "0", str(DEPTH), "--merge-enabled"],
+            capture_output=True, timeout=30)
+    if not os.path.exists(smt_path):
+        return "[proof not available]"
+    with open(smt_path) as f:
+        smt = f.read()
+    smt2 = re2.sub(r'\(set-option :incremental[^)]*\)\n?', '', smt)
+    qpath = "/tmp/proof_" + func_name + "_q.smt"
+    with open(qpath, "w") as f:
+        f.write(smt2)
+    z3out = sp2.run(["z3", qpath], capture_output=True,
+                    text=True, timeout=30).stdout.strip()
+    first = z3out.split("\n")[0].strip() if z3out else "unknown"
+    verdict = "VERIFIED" if first == "unsat" else "FALSIFIED" if first == "sat" else "UNKNOWN"
+    witness = None
+    if verdict == "FALSIFIED":
+        import re as re3
+        m = re3.search(r'define-fun i0.*?#x([0-9a-fA-F]+)', z3out, re3.DOTALL)
+        if m:
+            witness = int(m.group(1), 16)
+    W = 60
+    out = ["=" * W]
+    if verdict == "VERIFIED":
+        out.append("  PROOF: VERIFIED")
+        out.append("  Claim  : \"" + claim + "\"")
+        out.append("  Check  : " + check_exit)
+        out.append("  Z3     : UNSAT")
+        out.append("  Result : no 64-bit integer makes the check fire.")
+        out.append("  Proved for ALL 2^64 inputs. Formal proof, not a test.")
+    elif verdict == "FALSIFIED":
+        out.append("  PROOF: FALSIFIED")
+        out.append("  Claim   : \"" + claim + "\"")
+        out.append("  Check   : " + check_exit)
+        out.append("  Z3      : SAT")
+        out.append("  Witness : x = " + str(witness))
+        out.append("  Meaning : " + func_name + "(" + str(witness) + ") triggers the check.")
+        out.append("  Run the binary with this input to confirm.")
+    else:
+        out.append("  PROOF: " + verdict + " -- " + claim)
+    out.append("=" * W)
+    return "\n".join(out)

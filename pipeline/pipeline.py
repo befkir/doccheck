@@ -14,7 +14,7 @@ from pipeline.inject       import inject_check
 from pipeline.binary_verify import hybrid_verify
 from pipeline.proof_explain import explain_proof
 
-def check(function_source, claim, function_name, show_proof=False):
+def check(function_source, claim, function_name, show_proof=False, show_proof_full=False):
     print(f"\n{'='*60}")
     print(f"Function : {function_name}")
     print(f"Claim    : {claim}")
@@ -35,10 +35,14 @@ def check(function_source, claim, function_name, show_proof=False):
         print(f"Verdict  : {verdict}")
         print(f"Method   : {method}")
 
-    if show_proof:
+    if show_proof or show_proof_full:
         print()
-        proof = explain_proof(function_source, claim, check_stmt, function_name, verdict)
-        print(proof)
+        if show_proof_full:
+            from pipeline.proof_explain import explain_proof
+            print(explain_proof(function_source, claim, check_stmt, function_name))
+        else:
+            from pipeline.proof_explain import explain_proof_short
+            print(explain_proof_short(function_source, claim, check_stmt, function_name))
 
     return {"verdict": verdict, "witness": witness, "method": method}
 
@@ -47,7 +51,9 @@ if __name__ == "__main__":
     parser.add_argument("function_file", help="path to the C* source file")
     parser.add_argument("claim",         help="natural language claim to verify")
     parser.add_argument("--proof",       action="store_true",
-                        help="show annotated step-by-step proof trace")
+                        help="show proof conclusion (short)")
+    parser.add_argument("--proof-full",  action="store_true",
+                        help="show full annotated SMT-LIB2 proof trace")
     args = parser.parse_args()
 
     if not os.path.exists(args.function_file):
@@ -58,4 +64,6 @@ if __name__ == "__main__":
         source = f.read()
 
     func_name = os.path.splitext(os.path.basename(args.function_file))[0]
-    check(source, args.claim, func_name, show_proof=args.proof)
+    check(source, args.claim, func_name,
+          show_proof=args.proof,
+          show_proof_full=getattr(args, "proof_full", False))
