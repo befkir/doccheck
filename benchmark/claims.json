@@ -1,0 +1,376 @@
+[
+  {
+    "id": "max_ge_x",
+    "file": "max.c",
+    "function": "max",
+    "claim": "The result is always greater than or equal to x.",
+    "expected": "UNSAT"
+  },
+  {
+    "id": "max_eq_x_false",
+    "file": "max.c",
+    "function": "max",
+    "claim": "The result is always equal to x.",
+    "expected": "SAT"
+  },
+  {
+    "id": "absolute_nonneg",
+    "file": "absolute.c",
+    "claim": "never returns a negative value",
+    "expected": "UNSAT"
+  },
+  {
+    "id": "absolute_smaller",
+    "file": "absolute.c",
+    "claim": "output is always smaller than input",
+    "expected": "SAT"
+  },
+  {
+    "id": "double_nonneg",
+    "file": "double.c",
+    "claim": "never returns a negative value",
+    "expected": "UNSAT"
+  },
+  {
+    "id": "double_eq_input",
+    "file": "double.c",
+    "claim": "output equals input",
+    "expected": "SAT"
+  },
+  {
+    "id": "clamp_le100",
+    "file": "clamp.c",
+    "claim": "result is never greater than 100",
+    "expected": "UNSAT"
+  },
+  {
+    "id": "clamp_zero",
+    "file": "clamp.c",
+    "claim": "always returns zero",
+    "expected": "SAT"
+  },
+  {
+    "id": "min_le42",
+    "file": "min.c",
+    "claim": "never returns more than 42",
+    "expected": "UNSAT"
+  },
+  {
+    "id": "min_eq_input",
+    "file": "min.c",
+    "claim": "output equals input",
+    "expected": "SAT"
+  },
+  {
+    "id": "increment_nonneg",
+    "file": "increment.c",
+    "claim": "never returns a negative value",
+    "expected": "UNSAT"
+  },
+  {
+    "id": "increment_eq_input",
+    "file": "increment.c",
+    "claim": "output equals input",
+    "expected": "SAT"
+  },
+  {
+    "id": "identity_eq_input",
+    "file": "identity.c",
+    "claim": "output equals input",
+    "expected": "UNSAT"
+  },
+  {
+    "id": "identity_zero",
+    "file": "identity.c",
+    "claim": "always returns zero",
+    "expected": "SAT"
+  },
+  {
+    "id": "zero_always_zero",
+    "file": "zero.c",
+    "claim": "always returns zero",
+    "expected": "UNSAT"
+  },
+  {
+    "id": "zero_nonneg",
+    "file": "zero.c",
+    "claim": "never returns a negative value",
+    "expected": "UNSAT"
+  },
+  {
+    "id": "square_nonneg",
+    "file": "square.c",
+    "claim": "never returns a negative value",
+    "expected": "UNSAT"
+  },
+  {
+    "id": "square_eq_input",
+    "file": "square.c",
+    "claim": "output equals input",
+    "expected": "SAT"
+  },
+  {
+    "id": "isZero_smaller",
+    "file": "isZero.c",
+    "claim": "output is always smaller than input",
+    "expected": "SAT"
+  },
+  {
+    "id": "isZero_eq_input",
+    "file": "isZero.c",
+    "claim": "output equals input",
+    "expected": "SAT"
+  },
+  {
+    "id": "halve_smaller",
+    "file": "halve.c",
+    "claim": "output is always smaller than input",
+    "expected": "SAT"
+  },
+  {
+    "id": "halve_eq_input",
+    "file": "halve.c",
+    "claim": "output equals input",
+    "expected": "SAT"
+  },
+  {
+    "id": "add10_eq_input",
+    "file": "add10.c",
+    "claim": "output equals input",
+    "expected": "SAT"
+  },
+  {
+    "id": "add10_nonneg",
+    "file": "add10.c",
+    "claim": "never returns a negative value",
+    "expected": "UNSAT"
+  },
+  {
+    "id": "triple_eq_input",
+    "file": "triple.c",
+    "claim": "output equals input",
+    "expected": "SAT"
+  },
+  {
+    "id": "triple_nonneg",
+    "file": "triple.c",
+    "claim": "never returns a negative value",
+    "expected": "UNSAT"
+  },
+  {
+    "id": "pred_eq_input",
+    "file": "pred.c",
+    "claim": "output equals input",
+    "expected": "SAT"
+  },
+  {
+    "id": "pred_zero",
+    "file": "pred.c",
+    "claim": "always returns zero",
+    "expected": "SAT"
+  },
+  {
+    "id": "pred_smaller",
+    "file": "pred.c",
+    "claim": "output is always smaller than input",
+    "expected": "SAT"
+  },
+  {
+    "id": "const42_zero",
+    "file": "const42.c",
+    "claim": "always returns zero",
+    "expected": "SAT"
+  },
+  {
+    "id": "const42_eq_input",
+    "file": "const42.c",
+    "claim": "output equals input",
+    "expected": "SAT"
+  },
+  {
+    "id": "const42_nonneg",
+    "file": "const42.c",
+    "claim": "never returns a negative value",
+    "expected": "UNSAT"
+  },
+  {
+    "id": "mod2_nonneg",
+    "file": "mod2.c",
+    "claim": "never returns a negative value",
+    "expected": "UNSAT"
+  },
+  {
+    "id": "mod2_eq_input",
+    "file": "mod2.c",
+    "claim": "output equals input",
+    "expected": "SAT"
+  },
+  {
+    "id": "max_zero_nonneg",
+    "file": "max_zero.c",
+    "claim": "never returns a negative value",
+    "expected": "UNSAT"
+  },
+  {
+    "id": "max_zero_always_zero",
+    "file": "max_zero.c",
+    "claim": "always returns zero",
+    "expected": "SAT"
+  },
+  {
+    "id": "clamp10_le10",
+    "file": "clamp10.c",
+    "claim": "result is never greater than 10",
+    "expected": "UNSAT"
+  },
+  {
+    "id": "clamp10_zero",
+    "file": "clamp10.c",
+    "claim": "always returns zero",
+    "expected": "SAT"
+  },
+  {
+    "id": "between_le1",
+    "file": "between.c",
+    "claim": "never returns more than 1",
+    "expected": "UNSAT"
+  },
+  {
+    "id": "between_eq_input",
+    "file": "between.c",
+    "claim": "output equals input",
+    "expected": "SAT"
+  },
+  {
+    "id": "positive_le1",
+    "file": "positive.c",
+    "claim": "never returns more than 1",
+    "expected": "UNSAT"
+  },
+  {
+    "id": "positive_eq_input",
+    "file": "positive.c",
+    "claim": "output equals input",
+    "expected": "SAT"
+  },
+  {
+    "id": "clamp50_le50",
+    "file": "clamp50.c",
+    "claim": "result is never greater than 50",
+    "expected": "UNSAT"
+  },
+  {
+    "id": "clamp50_eq_input",
+    "file": "clamp50.c",
+    "claim": "output equals input",
+    "expected": "SAT"
+  },
+  {
+    "id": "add100_eq_input",
+    "file": "add100.c",
+    "claim": "output equals input",
+    "expected": "SAT"
+  },
+  {
+    "id": "add100_nonneg",
+    "file": "add100.c",
+    "claim": "never returns a negative value",
+    "expected": "UNSAT"
+  },
+  {
+    "id": "divby3_eq_input",
+    "file": "divby3.c",
+    "claim": "output equals input",
+    "expected": "SAT"
+  },
+  {
+    "id": "divby3_nonneg",
+    "file": "divby3.c",
+    "claim": "never returns a negative value",
+    "expected": "UNSAT"
+  },
+  {
+    "id": "mod10_nonneg",
+    "file": "mod10.c",
+    "claim": "never returns a negative value",
+    "expected": "UNSAT"
+  },
+  {
+    "id": "mod10_eq_input",
+    "file": "mod10.c",
+    "claim": "output equals input",
+    "expected": "SAT"
+  },
+  {
+    "id": "const0_always_zero",
+    "file": "const0.c",
+    "claim": "always returns zero",
+    "expected": "UNSAT"
+  },
+  {
+    "id": "const0_eq_input",
+    "file": "const0.c",
+    "claim": "output equals input",
+    "expected": "SAT"
+  },
+  {
+    "id": "const1_eq_input",
+    "file": "const1.c",
+    "claim": "output equals input",
+    "expected": "SAT"
+  },
+  {
+    "id": "const1_zero",
+    "file": "const1.c",
+    "claim": "always returns zero",
+    "expected": "SAT"
+  },
+  {
+    "id": "add1_eq_input",
+    "file": "add1.c",
+    "claim": "output equals input",
+    "expected": "SAT"
+  },
+  {
+    "id": "add1_nonneg",
+    "file": "add1.c",
+    "claim": "never returns a negative value",
+    "expected": "UNSAT"
+  },
+  {
+    "id": "max100_nonneg",
+    "file": "max100.c",
+    "claim": "never returns a negative value",
+    "expected": "UNSAT"
+  },
+  {
+    "id": "max100_eq_input",
+    "file": "max100.c",
+    "claim": "output equals input",
+    "expected": "SAT"
+  },
+  {
+    "id": "sign_le1",
+    "file": "sign.c",
+    "claim": "never returns more than 1",
+    "expected": "UNSAT"
+  },
+  {
+    "id": "sign_eq_input",
+    "file": "sign.c",
+    "claim": "output equals input",
+    "expected": "SAT"
+  },
+  {
+    "id": "factorial_nonneg",
+    "file": "factorial.c",
+    "claim": "never returns a negative value",
+    "expected": "UNSAT"
+  },
+  {
+    "id": "factorial_eq_input",
+    "file": "factorial.c",
+    "claim": "output equals input",
+    "expected": "SAT"
+  }
+]
