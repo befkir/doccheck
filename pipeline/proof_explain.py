@@ -249,6 +249,11 @@ def explain_proof_short(source: str, claim: str, check_stmt: str,
         out.append("  Z3     : UNSAT")
         out.append("  Result : no 64-bit integer makes the check fire.")
         out.append("  Proved for ALL 2^64 inputs. Formal proof, not a test.")
+        out.append("")
+        out.append("  Why this is a proof:")
+        out.append("  i0 is unconstrained -- it represents every possible")
+        out.append("  64-bit value simultaneously, not a sample. UNSAT means")
+        out.append("  no value of i0 satisfies the violation. Exhaustive.")
     elif verdict == "FALSIFIED":
         out.append("  PROOF: FALSIFIED")
         out.append("  Claim   : \"" + claim + "\"")
@@ -257,6 +262,11 @@ def explain_proof_short(source: str, claim: str, check_stmt: str,
         out.append("  Witness : x = " + str(witness))
         out.append("  Meaning : " + func_name + "(" + str(witness) + ") triggers the check.")
         out.append("  Run the binary with this input to confirm.")
+        out.append("")
+        out.append("  Why this is proof:")
+        out.append("  x was extracted directly from Z3's model -- not")
+        out.append("  guessed. Independently verifiable by running the")
+        out.append("  compiled binary with this exact input.")
     else:
         out.append("  PROOF: " + verdict + " -- " + claim)
     out.append("=" * W)
