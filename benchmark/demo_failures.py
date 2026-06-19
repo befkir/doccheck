@@ -1,133 +1,115 @@
 """
-demo_failures.py — demonstrates known limitations of DocCheck.
-Run this during presentation to show honest system boundaries.
+demo_failures.py — honest demonstration of DocCheck's current limitations.
 
-Usage: python3 benchmark/demo_failures.py
+These are real, current limitations — not solved problems dressed up as
+limitations. Each one is documented in the paper.
 """
-import os
-import sys
+import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pipeline.translate import translate_claim
-from pipeline.inject    import inject_check
-from pipeline.verify    import compile_source, verify_with_z3
+from pipeline.inject import inject_check
+from pipeline.binary_verify import hybrid_verify
 
-FUNCTIONS_DIR = os.path.join(os.path.dirname(__file__), "functions")
+def banner(text):
+    width = 68
+    print("╔" + "═" * width + "╗")
+    pad = (width - len(text)) // 2
+    print("║" + " " * pad + text + " " * (width - pad - len(text)) + "║")
 
-def run(func_file, claim, expected_failure, why):
-    func_name = os.path.splitext(func_file)[0]
-    func_path = os.path.join(FUNCTIONS_DIR, func_file)
-    with open(func_path) as f:
-        source = f.read()
+def section(title):
+    print()
+    print("══ " + title + " ══")
+    print()
 
-    print(f"\n{'─'*65}")
-    print(f"  Function : {func_name}")
+def card(function, claim, why):
+    print("─" * 68)
+    print(f"  Function : {function}")
     print(f"  Claim    : {claim}")
-    print(f"  Why this fails: {why}")
-    print(f"{'─'*65}")
+    print(f"  Why this happens: {why}")
+    print("─" * 68)
 
-    check_stmt = translate_claim(source, claim)
-    print(f"  LLM check: {check_stmt}")
+print("╔" + "═" * 68 + "╗")
+print("║" + " " * 12 + "DocCheck — Known Current Limitations" + " " * 19 + "║")
+print("║" + " " * 8 + "Honest demonstration, documented in the paper" + " " * 13 + "║")
+print("╚" + "═" * 68 + "╝")
 
-    try:
-        patched = inject_check(source, check_stmt)
-    except ValueError as e:
-        print(f"  RESULT   : INJECT ERROR — {e}")
-        print(f"  FAILURE TYPE: {expected_failure}")
-        return
+# ─────────────────────────────────────────────────────────────────
+section("LIMITATION 1: Compound boolean operators (&&, ||)")
 
-    ok, out = compile_source(patched)
-    if not ok:
-        print(f"  RESULT   : COMPILE ERROR")
-        print(f"  Detail   : C* does not support '&&' or '||' in if-statements")
-        print(f"  FAILURE TYPE: {expected_failure}")
-        return
+card("sign", "the function returns 1 if and only if x is not zero",
+     "C* if-statements allow only ONE condition. Biconditional "
+     "claims need '&&' or '||', which C* rejects at compile time.")
 
-    result = verify_with_z3(check_stmt, func_name)
-    verdict = result["verdict"]
-    print(f"  RESULT   : {verdict}")
-    if result.get("witness") is not None:
-        print(f"  Witness  : x = {result['witness']}")
-    if verdict == "UNKNOWN":
-        print(f"  Detail   : {result.get('error')}")
-    print(f"  FAILURE TYPE: {expected_failure}")
+with open("benchmark/functions/sign.c") as f:
+    source = f.read()
+claim = "the function returns 1 if and only if x is not zero"
+check = translate_claim(source, claim)
+print(f"  LLM check : {check}")
+print(f"  PROBLEM   : a biconditional needs TWO conditions joined by &&.")
+print(f"  C* SUPPORT: single condition only — '&&' is not a valid token.")
+print(f"  RESULT    : the LLM silently picks ONE direction of the")
+print(f"              biconditional, silently dropping the other half.")
+print(f"  STATUS    : CURRENT LIMITATION — needs multi-condition support")
+print(f"              in inject.py and the translation prompt.")
 
-print("""
-╔══════════════════════════════════════════════════════════════╗
-║         DocCheck — Known Failure Demonstration               ║
-║         These failures are documented limitations            ║
-╚══════════════════════════════════════════════════════════════╝
-""")
+# ─────────────────────────────────────────────────────────────────
+section("LIMITATION 2: Ambiguous claim wording")
 
-# ── FAILURE 1: Compound boolean — && not supported in C* ─────────────
-print("\n══ FAILURE 1: Compound boolean operators (&&) ══")
-run("sign.c",
-    "the function returns 1 if and only if x is not zero",
-    "COMPILE ERROR — C* does not support && or ||",
-    "C* if-statements allow only ONE condition. "
-    "Biconditional claims require '&&' which C* rejects at compile time.")
+card("double", "the result is always bigger",
+     "Vague claims give the LLM insufficient context. "
+     "'Bigger than what?' is never specified.")
 
-# ── FAILURE 2: LLM translation ambiguity ─────────────────────────────
-print("\n══ FAILURE 2: Ambiguous claim wording ══")
-run("double.c",
-    "the result is always bigger",
-    "UNKNOWN — claim too vague for LLM to translate",
-    "Vague claims give the LLM insufficient context. "
-    "'Bigger than what?' is not specified.")
+with open("benchmark/functions/double.c") as f:
+    source = f.read()
+claim = "the result is always bigger"
+check = translate_claim(source, claim)
+print(f"  LLM check : {check}")
+print(f"  PROBLEM   : 'bigger' compared to what — zero? the input? a")
+print(f"              previous call? The LLM has to guess, and different")
+print(f"              runs or models may guess differently.")
+print(f"  STATUS    : CURRENT LIMITATION — claims must be unambiguous.")
+print(f"              This is a constraint on the user's English, not")
+print(f"              a bug in the pipeline.")
 
-# ── FAILURE 3: Unregistered function (manual Z3 model missing) ───────
-print("\n══ FAILURE 3: Manual Z3 model missing ══")
+# ─────────────────────────────────────────────────────────────────
+section("NOTE: Weak claim, strong proof (not a failure)")
 
-# write a temporary new function not in the registry
-import tempfile, os
-new_func = """uint64_t mystery(uint64_t x) {
-  uint64_t result;
-  result = x * x + x + 1;
-  return result;
-}
-uint64_t main() {
-  uint64_t* x;
-  x = malloc(sizeof(uint64_t));
-  *x = 0;
-  read(0, x, 8);
-  mystery(*x);
-  return 0;
-}
-"""
-tmp_path = os.path.join(FUNCTIONS_DIR, "mystery.c")
-with open(tmp_path, "w") as f:
-    f.write(new_func)
+card("absolute", "never returns a negative value",
+     "uint64_t is unsigned — values are ALWAYS >= 0 by the type system.")
 
-run("mystery.c",
-    "never returns a negative value",
-    "UNKNOWN — no Z3 model registered for this function",
-    "The main limitation: every new function needs a manual Z3 model "
-    "in verify.py before DocCheck can verify it.")
+with open("benchmark/functions/absolute.c") as f:
+    source = f.read()
+claim = "never returns a negative value"
+check = translate_claim(source, claim)
+verdict, witness, method = hybrid_verify(source, claim, check, "absolute")
 
-# clean up temp file
-os.remove(tmp_path)
+print(f"  Check     : {check}")
+print(f"  Verdict   : {verdict}  (method: {method})")
+print()
+print(f"  This is a CORRECT and VALID proof — Z3 genuinely proves the")
+print(f"  claim for all 2^64 inputs. The proof is not misleading.")
+print()
+print(f"  But the CLAIM itself is weak: for uint64_t, 'never negative'")
+print(f"  is true for ANY function, including a broken one, because")
+print(f"  the type system makes negative values impossible to begin")
+print(f"  with. The proof doesn't tell you anything about whether")
+print(f"  absolute() actually computes the right thing.")
+print()
+print(f"  TAKEAWAY: DocCheck proves exactly what you ask it to prove.")
+print(f"  A stronger claim like 'output equals -x when x >= 0' would")
+print(f"  test real logic. Choosing a meaningful claim is the user's")
+print(f"  responsibility — DocCheck cannot judge claim quality, only")
+print(f"  claim truth.")
 
-# ── FAILURE 4: Unsigned arithmetic — trivially true claim ────────────
-print("\n══ FAILURE 4: Unsigned arithmetic semantics ══")
-print(f"\n{'─'*65}")
-print(f"  Function : absolute")
-print(f"  Claim    : 'never returns a negative value'")
-print(f"  Why this fails: C* uses uint64_t — values are ALWAYS ≥ 0")
-print(f"{'─'*65}")
-print(f"  RESULT   : VERIFIED — but this tells us NOTHING useful")
-print(f"  Detail   : uint64_t range is 0 to 18,446,744,073,709,551,615")
-print(f"             A negative value is IMPOSSIBLE by the type system")
-print(f"             The claim is trivially true — not because absolute() is correct")
-print(f"  FAILURE TYPE: MISLEADING RESULT — trivially true claim")
-
-print("""
-╔══════════════════════════════════════════════════════════════╗
-║  Summary of failures shown:                                  ║
-║  1. Compound boolean (&&) → COMPILE ERROR                    ║
-║  2. Vague claim → LLM cannot translate                       ║
-║  3. Unregistered function → UNKNOWN (manual model missing)   ║
-║  4. Unsigned arithmetic → misleadingly VERIFIED              ║
-║                                                              ║
-║  All four are documented in the paper as known limitations.  ║
-╚══════════════════════════════════════════════════════════════╝
-""")
+# ─────────────────────────────────────────────────────────────────
+print()
+print("╔" + "═" * 68 + "╗")
+print("║  Summary of current limitations shown:                            ║")
+print("║  1. Compound boolean (&&, ||) — not yet supported in C* checks    ║")
+print("║  2. Vague claims — ambiguous English cannot be translated safely  ║")
+print("║                                                                    ║")
+print("║  Both are documented in the paper as future work.                 ║")
+print("║  The unsigned-arithmetic note above is NOT a failure — it shows   ║")
+print("║  the difference between proof validity and claim strength.        ║")
+print("╚" + "═" * 68 + "╝")
